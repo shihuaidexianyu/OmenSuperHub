@@ -85,7 +85,7 @@ namespace OmenSuperHub {
     static string fanTable = "silent", fanMode = "performance", fanControl = "auto", tempSensitivity = "high", cpuPower = "max", gpuPower = "max", autoStart = "off", customIcon = "original", floatingBar = "off", floatingBarLoc = "left", omenKey = "default";
     //static OpenComputer openComputer = new OpenComputer() { CPUEnabled = true };
     static LibreComputer libreComputer = new LibreComputer() { IsCpuEnabled = true, IsGpuEnabled = true };
-    static bool openLib = true, monitorGPU = true, monitorFan = true, isConnectedToNVIDIA = true, powerOnline = true;
+    static bool openLib = true, monitorGPU = true, monitorFan = true, powerOnline = true;
     static List<int> fanSpeedNow = new List<int> { 20, 23 };
     static float respondSpeed = 0.4f;
     static Dictionary<float, List<int>> CPUTempFanMap = new Dictionary<float, List<int>>();
@@ -126,8 +126,6 @@ namespace OmenSuperHub {
         Application.SetCompatibleTextRenderingDefault(false);
 
         powerOnline = SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
-        monitorQuery();
-
         Version version = Assembly.GetExecutingAssembly().GetName().Version;
         string versionString = version.ToString().Replace(".", "");
         alreadyReadCode = new Random(int.Parse(versionString)).Next(1000, 10000);
@@ -236,27 +234,6 @@ namespace OmenSuperHub {
         ref DISPLAY_DEVICE lpDisplayDevice,
         uint dwFlags);
 
-    // 判断独显未工作条件
-    static void monitorQuery() {
-      if (Screen.AllScreens.Length != 1)
-        return;
-      DISPLAY_DEVICE d = new DISPLAY_DEVICE();
-      d.cb = Marshal.SizeOf(d);
-      uint deviceNum = 0;
-
-      while (EnumDisplayDevices(null, deviceNum, ref d, 0)) {
-        if (d.StateFlags.HasFlag(DisplayDeviceStateFlags.AttachedToDesktop)) {
-          if (d.DeviceString.Contains("Intel") || d.DeviceString.Contains("AMD")) {
-            isConnectedToNVIDIA = false;
-            return;
-          }
-        }
-        deviceNum++;
-      }
-
-      isConnectedToNVIDIA = true;
-    }
-
     static int flagStart = 0;
     static void optimiseSchedule() {
       // 延时等待风扇恢复响应
@@ -273,8 +250,6 @@ namespace OmenSuperHub {
 
       //定时通信避免功耗锁定
       GetFanCount();
-      //更新显示器连接到显卡状态
-      monitorQuery();
     }
 
     static void OnPowerChange(object s, PowerModeChangedEventArgs e) {
@@ -610,28 +585,6 @@ namespace OmenSuperHub {
 
       trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator()); // Separator between groups
       ToolStripMenuItem hardwareMonitorMenu = new ToolStripMenuItem("硬件监控");
-      ToolStripMenuItem monitorGPUMenu = new ToolStripMenuItem("GPU");
-      monitorGPUMenu.DropDownItems.Add(CreateMenuItem("开启GPU监控", "monitorGPUGroup", (s, e) => {
-        monitorGPU = true;
-        if (hasStopAuto)
-          autoStopMonitorGPU = false;
-        //重置自动开启标志
-        hasStartAuto = false;
-        autoStartMonitorGPU = true;
-        libreComputer.IsGpuEnabled = true;
-        SaveConfig("MonitorGPU");
-      }, true));
-      monitorGPUMenu.DropDownItems.Add(CreateMenuItem("关闭GPU监控", "monitorGPUGroup", (s, e) => {
-        monitorGPU = false;
-        if (hasStartAuto)
-          autoStartMonitorGPU = false;
-        //重置自动关闭标志
-        hasStopAuto = false;
-        autoStopMonitorGPU = true;
-        libreComputer.IsGpuEnabled = false;
-        SaveConfig("MonitorGPU");
-      }, false));
-      hardwareMonitorMenu.DropDownItems.Add(monitorGPUMenu);
       ToolStripMenuItem monitorFanMenu = new ToolStripMenuItem("风扇");
       monitorFanMenu.DropDownItems.Add(CreateMenuItem("开启风扇监控", "monitorFanGroup", (s, e) => {
         monitorFan = true;
@@ -1245,14 +1198,9 @@ namespace OmenSuperHub {
       }
     }
 
-    static int countQuery = 0;
-    static bool autoStartMonitorGPU = true, autoStopMonitorGPU = true;//是否自动根据情况开/关GPU温度监测以节约能源
-    static bool hasStartAuto = false, hasStopAuto = false;//是否已经自动开/关过GPU温度监测，在手动开/关时重置
     static void QueryHarware() {
       float openTempCPU = -300, libreTempCPU = -300, tempCPU = 50;
       float openPowerCPU = -1, librePowerCPU = -1;
-      bool getGPU = false;//是否获取到GPU温度
-
       //if (openLib) {
       //  foreach (OpenIHardware hardware in openComputer.Hardware) {
       //    hardware.Update();
@@ -1288,7 +1236,6 @@ namespace OmenSuperHub {
                 GPUTemp = (int)sensor.Value.GetValueOrDefault() * respondSpeed + GPUTemp * (1.0f - respondSpeed);
               }
               if (sensor.Name == "GPU Package" && sensor.SensorType == LibreSensorType.Power) {
-                getGPU = true;
                 if ((int)(sensor.Value.GetValueOrDefault() * 10) == 5900)
                   GPUPower = 0;
                 else
@@ -1324,53 +1271,8 @@ namespace OmenSuperHub {
         advancedStatusTick--;
       }
 
-      //通过countQuery延时来确保温度正常读取
-      if (countQuery <= 5 && monitorGPU)
-        countQuery++;
-      //自动关闭GPU监控
-      if (countQuery > 5 && autoStopMonitorGPU && !isConnectedToNVIDIA && monitorGPU && ((GPUPower >= 0 && GPUPower <= 1.3) || !getGPU)) {
-        GPUPower = 0;
-        getGPU = false;
-        hasStopAuto = true;
-        countQuery = 0;
-        monitorGPU = false;
-        //重置自动开启标志
-        hasStartAuto = false;
-        autoStartMonitorGPU = true;
-        libreComputer.IsGpuEnabled = false;
-        UpdateCheckedState("monitorGPUGroup", "关闭GPU监控");
-        SaveConfig("MonitorGPU");
-
-        // 设置通知的文本和标题
-        trayIcon.BalloonTipTitle = "状态更改提示";
-        trayIcon.BalloonTipText = "检测到显卡进入低功耗状态，OSH已停止监控GPU以节约能源。\n手动打开GPU监控后，本次将不再自动停止监控GPU。";
-        trayIcon.BalloonTipIcon = ToolTipIcon.Info; // 图标类型
-        trayIcon.ShowBalloonTip(3000); // 显示气泡通知，持续时间为 3 秒
-      }
-      //自动开启GPU监控
-      if (autoStartMonitorGPU && isConnectedToNVIDIA && !monitorGPU) {
-        GPUPower = 0;
-        hasStartAuto = true;
-        countQuery = 0;
-        monitorGPU = true;
-        //重置自动关闭标志
-        hasStopAuto = false;
-        autoStopMonitorGPU = true;
+      if (!libreComputer.IsGpuEnabled) {
         libreComputer.IsGpuEnabled = true;
-        UpdateCheckedState("monitorGPUGroup", "开启GPU监控");
-        SaveConfig("MonitorGPU");
-
-        // 设置通知的文本和标题
-        trayIcon.BalloonTipTitle = "状态更改提示";
-        trayIcon.BalloonTipText = "检测到显卡连接到显示器，OSH已开始监控GPU。\n手动关闭GPU监控后，本次将不再自动开始监控GPU。";
-        trayIcon.BalloonTipIcon = ToolTipIcon.Info; // 图标类型
-        trayIcon.ShowBalloonTip(3000); // 显示气泡通知，持续时间为 3 秒
-      }
-
-      // 似乎无法一次性关闭GPU监控及选项
-      if (!monitorGPU && libreComputer.IsGpuEnabled) {
-        libreComputer.IsGpuEnabled = false;
-        UpdateCheckedState("monitorGPUGroup", "关闭GPU监控");
       }
 
       //Console.WriteLine($"openCPU: {openTempCPU}℃, {openPowerCPU}W");
@@ -1837,7 +1739,6 @@ namespace OmenSuperHub {
               key.SetValue("AlreadyRead", alreadyRead);
               key.SetValue("CustomIcon", customIcon);
               key.SetValue("OmenKey", omenKey);
-              key.SetValue("MonitorGPU", monitorGPU);
               key.SetValue("MonitorFan", monitorFan);
               key.SetValue("FloatingBarSize", textSize);
               key.SetValue("FloatingBarLoc", floatingBarLoc);
@@ -1879,9 +1780,6 @@ namespace OmenSuperHub {
                   break;
                 case "OmenKey":
                   key.SetValue("OmenKey", omenKey);
-                  break;
-                case "MonitorGPU":
-                  key.SetValue("MonitorGPU", monitorGPU);
                   break;
                 case "MonitorFan":
                   key.SetValue("MonitorFan", monitorFan);
@@ -2067,16 +1965,8 @@ namespace OmenSuperHub {
                 break;
             }
 
-            bool monitorGPUCache = Convert.ToBoolean(key.GetValue("MonitorGPU", true));
-            if (monitorGPUCache == true) {
-              libreComputer.IsGpuEnabled = true;
-              monitorGPU = true;
-              UpdateCheckedState("monitorGPUGroup", "开启GPU监控");
-            } else {
-              libreComputer.IsGpuEnabled = false;
-              monitorGPU = false;
-              UpdateCheckedState("monitorGPUGroup", "关闭GPU监控");
-            }
+            libreComputer.IsGpuEnabled = true;
+            monitorGPU = true;
 
             bool monitorFanCache = Convert.ToBoolean(key.GetValue("MonitorFan", true));
             if (monitorFanCache == true) {
