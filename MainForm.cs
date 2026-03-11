@@ -88,7 +88,7 @@ namespace OmenSuperHub {
         RowCount = 3,
         Padding = new Padding(20)
       };
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112F));
+      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 176F));
       root.RowStyles.Add(new RowStyle(SizeType.Absolute, 300F));
       root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
@@ -112,28 +112,40 @@ namespace OmenSuperHub {
         Dock = DockStyle.Fill,
         BackColor = Color.Transparent,
         ColumnCount = 2,
-        RowCount = 2
+        RowCount = 1
       };
       layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
       layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
       layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-      var titleLabel = new Label {
+      var infoLayout = new FlowLayoutPanel {
         Dock = DockStyle.Fill,
+        FlowDirection = FlowDirection.TopDown,
+        WrapContents = false,
+        AutoScroll = false,
+        AutoSize = false,
+        Margin = new Padding(0),
+        Padding = new Padding(0),
+        BackColor = Color.Transparent
+      };
+
+      var titleLabel = new Label {
+        AutoSize = true,
         Text = "功率与热状态面板",
         Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
         ForeColor = Color.FromArgb(250, 242, 234),
-        TextAlign = ContentAlignment.BottomLeft
+        TextAlign = ContentAlignment.MiddleLeft,
+        Margin = new Padding(0, 0, 0, 8)
       };
 
       var buttonRow = new FlowLayoutPanel {
-        Dock = DockStyle.Fill,
-        FlowDirection = FlowDirection.LeftToRight,
+        Dock = DockStyle.Top,
+        FlowDirection = FlowDirection.RightToLeft,
         WrapContents = false,
         BackColor = Color.Transparent,
         Margin = new Padding(0),
-        Padding = new Padding(0, 2, 0, 0)
+        Padding = new Padding(0),
+        AutoSize = true
       };
 
       var refreshButton = CreateHeaderButton("立即刷新", Color.FromArgb(212, 117, 43));
@@ -145,40 +157,36 @@ namespace OmenSuperHub {
       buttonRow.Controls.Add(refreshButton);
       buttonRow.Controls.Add(hideButton);
 
-      var heroLayout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        BackColor = Color.Transparent,
-        ColumnCount = 1,
-        RowCount = 2,
-        Margin = new Padding(0)
-      };
-      heroLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-      heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
       titleValueLabel = new Label {
-        Dock = DockStyle.Fill,
+        AutoSize = true,
         Text = "--",
         Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
         ForeColor = Color.FromArgb(255, 186, 92),
-        TextAlign = ContentAlignment.MiddleLeft
+        TextAlign = ContentAlignment.MiddleLeft,
+        Margin = new Padding(0, 0, 0, 8)
       };
 
       subtitleValueLabel = new Label {
-        Dock = DockStyle.Fill,
-        AutoEllipsis = true,
+        AutoSize = false,
         Text = "正在收集硬件状态...",
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
         ForeColor = Color.FromArgb(214, 200, 181),
-        TextAlign = ContentAlignment.TopLeft
+        TextAlign = ContentAlignment.TopLeft,
+        Margin = new Padding(0),
+        Size = new Size(640, 44)
       };
 
-      heroLayout.Controls.Add(titleValueLabel, 0, 0);
-      heroLayout.Controls.Add(subtitleValueLabel, 0, 1);
+      infoLayout.Resize += (s, e) => {
+        subtitleValueLabel.Width = Math.Max(280, infoLayout.ClientSize.Width - 2);
+        subtitleValueLabel.Height = 44;
+      };
 
-      layout.Controls.Add(titleLabel, 0, 0);
+      infoLayout.Controls.Add(titleLabel);
+      infoLayout.Controls.Add(titleValueLabel);
+      infoLayout.Controls.Add(subtitleValueLabel);
+
+      layout.Controls.Add(infoLayout, 0, 0);
       layout.Controls.Add(buttonRow, 1, 0);
-      layout.Controls.Add(heroLayout, 0, 1);
-      layout.SetColumnSpan(heroLayout, 2);
 
       panel.Controls.Add(layout);
 
