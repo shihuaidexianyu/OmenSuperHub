@@ -88,8 +88,8 @@ namespace OmenSuperHub {
         RowCount = 3,
         Padding = new Padding(20)
       };
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220F));
+      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 112F));
+      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 300F));
       root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       root.Controls.Add(BuildHeader(), 0, 0);
@@ -105,32 +105,35 @@ namespace OmenSuperHub {
         Dock = DockStyle.Fill,
         BackColor = Color.FromArgb(60, 47, 38),
         Margin = new Padding(0, 0, 0, 14),
-        Padding = new Padding(22, 16, 22, 16)
+        Padding = new Padding(18, 14, 18, 14)
       };
+
+      var layout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        BackColor = Color.Transparent,
+        ColumnCount = 2,
+        RowCount = 2
+      };
+      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       var titleLabel = new Label {
-        AutoSize = true,
+        Dock = DockStyle.Fill,
         Text = "功率与热状态面板",
-        Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
         ForeColor = Color.FromArgb(250, 242, 234),
-        Location = new Point(18, 12)
+        TextAlign = ContentAlignment.BottomLeft
       };
 
-      titleValueLabel = new Label {
-        AutoSize = true,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(255, 186, 92),
-        Location = new Point(20, 48)
-      };
-
-      subtitleValueLabel = new Label {
-        AutoEllipsis = true,
-        Text = "正在收集硬件状态...",
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(214, 200, 181),
-        Location = new Point(220, 56),
-        Size = new Size(520, 22)
+      var buttonRow = new FlowLayoutPanel {
+        Dock = DockStyle.Fill,
+        FlowDirection = FlowDirection.LeftToRight,
+        WrapContents = false,
+        BackColor = Color.Transparent,
+        Margin = new Padding(0),
+        Padding = new Padding(0, 2, 0, 0)
       };
 
       var refreshButton = CreateHeaderButton("立即刷新", Color.FromArgb(212, 117, 43));
@@ -139,17 +142,45 @@ namespace OmenSuperHub {
       var hideButton = CreateHeaderButton("隐藏到托盘", Color.FromArgb(113, 93, 74));
       hideButton.Click += (s, e) => Hide();
 
-      panel.Resize += (s, e) => {
-        hideButton.Location = new Point(panel.ClientSize.Width - hideButton.Width - 16, 26);
-        refreshButton.Location = new Point(hideButton.Left - refreshButton.Width - 10, 26);
-        subtitleValueLabel.Width = Math.Max(220, refreshButton.Left - subtitleValueLabel.Left - 16);
+      buttonRow.Controls.Add(refreshButton);
+      buttonRow.Controls.Add(hideButton);
+
+      var heroLayout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        BackColor = Color.Transparent,
+        ColumnCount = 1,
+        RowCount = 2,
+        Margin = new Padding(0)
+      };
+      heroLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+      titleValueLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = "--",
+        Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(255, 186, 92),
+        TextAlign = ContentAlignment.MiddleLeft
       };
 
-      panel.Controls.Add(titleLabel);
-      panel.Controls.Add(titleValueLabel);
-      panel.Controls.Add(subtitleValueLabel);
-      panel.Controls.Add(refreshButton);
-      panel.Controls.Add(hideButton);
+      subtitleValueLabel = new Label {
+        Dock = DockStyle.Fill,
+        AutoEllipsis = true,
+        Text = "正在收集硬件状态...",
+        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
+        ForeColor = Color.FromArgb(214, 200, 181),
+        TextAlign = ContentAlignment.TopLeft
+      };
+
+      heroLayout.Controls.Add(titleValueLabel, 0, 0);
+      heroLayout.Controls.Add(subtitleValueLabel, 0, 1);
+
+      layout.Controls.Add(titleLabel, 0, 0);
+      layout.Controls.Add(buttonRow, 1, 0);
+      layout.Controls.Add(heroLayout, 0, 1);
+      layout.SetColumnSpan(heroLayout, 2);
+
+      panel.Controls.Add(layout);
 
       return panel;
     }
@@ -194,9 +225,9 @@ namespace OmenSuperHub {
 
       grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
       grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 40F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       grid.Controls.Add(CreateMetricCard("CPU 温度", out cpuTempValueLabel, Color.FromArgb(26, 103, 159)), 0, 0);
       grid.Controls.Add(CreateMetricCard("CPU 功率", out cpuPowerValueLabel, Color.FromArgb(222, 118, 46)), 1, 0);
@@ -223,9 +254,9 @@ namespace OmenSuperHub {
       };
       layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
       layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
       for (int i = 1; i < 7; i++) {
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
       }
 
       var title = new Label {
@@ -261,7 +292,7 @@ namespace OmenSuperHub {
         Dock = DockStyle.Fill,
         Text = "--",
         AutoEllipsis = true,
-        Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular),
+        Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular),
         ForeColor = Color.FromArgb(50, 39, 30),
         TextAlign = ContentAlignment.MiddleLeft
       };
@@ -283,7 +314,7 @@ namespace OmenSuperHub {
         Padding = new Padding(16, 0, 16, 12)
       };
       layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
       layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       var accent = new Panel {
@@ -295,7 +326,7 @@ namespace OmenSuperHub {
       var titleLabel = new Label {
         Dock = DockStyle.Fill,
         Text = title,
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
         ForeColor = Color.FromArgb(135, 108, 82),
         TextAlign = ContentAlignment.BottomLeft
       };
@@ -303,7 +334,7 @@ namespace OmenSuperHub {
       valueLabel = new Label {
         Dock = DockStyle.Fill,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
         ForeColor = Color.FromArgb(49, 39, 30),
         TextAlign = ContentAlignment.MiddleLeft,
         AutoEllipsis = true
@@ -328,9 +359,9 @@ namespace OmenSuperHub {
         Padding = new Padding(16, 0, 16, 14)
       };
       layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
       layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
 
       var accent = new Panel {
@@ -342,7 +373,7 @@ namespace OmenSuperHub {
       var titleLabel = new Label {
         Dock = DockStyle.Fill,
         Text = "电池功率与容量",
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
         ForeColor = Color.FromArgb(135, 108, 82),
         TextAlign = ContentAlignment.BottomLeft
       };
@@ -350,7 +381,7 @@ namespace OmenSuperHub {
       batteryPowerValueLabel = new Label {
         Dock = DockStyle.Fill,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
         ForeColor = Color.FromArgb(49, 39, 30),
         TextAlign = ContentAlignment.MiddleLeft,
         AutoEllipsis = true
