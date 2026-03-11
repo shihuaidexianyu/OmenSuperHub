@@ -51,7 +51,11 @@ internal class MemoryGroup : IGroup, IHardwareChanged
     }
 
     public event HardwareEventHandler HardwareAdded;
-    public event HardwareEventHandler HardwareRemoved;
+    event HardwareEventHandler IHardwareChanged.HardwareRemoved
+    {
+        add { }
+        remove { }
+    }
 
     public IReadOnlyList<IHardware> Hardware => _hardware;
 

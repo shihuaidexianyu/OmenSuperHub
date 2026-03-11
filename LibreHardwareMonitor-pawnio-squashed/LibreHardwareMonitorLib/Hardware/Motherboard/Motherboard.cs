@@ -95,10 +95,18 @@ public class Motherboard : IHardware
     }
 
     /// <inheritdoc />
-    public event SensorEventHandler SensorAdded;
+    event SensorEventHandler IHardware.SensorAdded
+    {
+        add { }
+        remove { }
+    }
 
     /// <inheritdoc />
-    public event SensorEventHandler SensorRemoved;
+    event SensorEventHandler IHardware.SensorRemoved
+    {
+        add { }
+        remove { }
+    }
 
     /// <inheritdoc />
     public HardwareType HardwareType => HardwareType.Motherboard;
