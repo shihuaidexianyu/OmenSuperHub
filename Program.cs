@@ -93,6 +93,7 @@ namespace OmenSuperHub {
     static readonly object fanMapLock = new object();
     static readonly object floatingFormLock = new object();
     static System.Threading.Timer fanControlTimer;
+    static System.Threading.Timer hardwarePollingTimer;
     static System.Windows.Forms.Timer tooltipUpdateTimer;
     static System.Windows.Forms.Timer checkFloatingTimer, optimiseTimer;
     static NotifyIcon trayIcon;
@@ -142,6 +143,19 @@ namespace OmenSuperHub {
         optimiseTimer.Interval = 30000;
         optimiseTimer.Tick += (s, e) => optimiseSchedule();
         optimiseTimer.Start();
+
+        hardwarePollingTimer = new System.Threading.Timer((e) => {
+          if (isShuttingDown) {
+            return;
+          }
+
+          try {
+            QueryHarware();
+            if (monitorFan)
+              fanSpeedNow = GetFanLevel();
+          } catch {
+          }
+        }, null, 100, 1000);
 
         // Main loop to query CPU and GPU temperature every second
         fanControlTimer = new System.Threading.Timer((e) => {
@@ -1157,9 +1171,6 @@ namespace OmenSuperHub {
         return;
       }
 
-      QueryHarware();
-      if (monitorFan)
-        fanSpeedNow = GetFanLevel();
       trayIcon.Text = traySummaryText();
       // Console.WriteLine("UpdateTooltip");
 
@@ -2307,6 +2318,11 @@ namespace OmenSuperHub {
         tooltipUpdateTimer.Stop();
         tooltipUpdateTimer.Dispose();
         tooltipUpdateTimer = null;
+      }
+
+      if (hardwarePollingTimer != null) {
+        hardwarePollingTimer.Dispose();
+        hardwarePollingTimer = null;
       }
 
       if (checkFloatingTimer != null) {

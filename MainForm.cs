@@ -49,6 +49,7 @@ namespace OmenSuperHub {
       StartPosition = FormStartPosition.CenterScreen;
       MinimumSize = new Size(980, 700);
       Size = new Size(1120, 780);
+      AutoScaleMode = AutoScaleMode.Dpi;
       BackColor = Color.FromArgb(243, 239, 231);
       Icon = Properties.Resources.fan;
       Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
@@ -118,7 +119,7 @@ namespace OmenSuperHub {
       titleValueLabel = new Label {
         AutoSize = true,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
         ForeColor = Color.FromArgb(255, 186, 92),
         Location = new Point(20, 48)
       };
@@ -302,7 +303,7 @@ namespace OmenSuperHub {
       valueLabel = new Label {
         Dock = DockStyle.Fill,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold),
         ForeColor = Color.FromArgb(49, 39, 30),
         TextAlign = ContentAlignment.MiddleLeft,
         AutoEllipsis = true
@@ -349,7 +350,7 @@ namespace OmenSuperHub {
       batteryPowerValueLabel = new Label {
         Dock = DockStyle.Fill,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Bold),
+        Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold),
         ForeColor = Color.FromArgb(49, 39, 30),
         TextAlign = ContentAlignment.MiddleLeft,
         AutoEllipsis = true
