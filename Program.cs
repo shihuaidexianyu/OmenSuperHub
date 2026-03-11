@@ -101,6 +101,7 @@ namespace OmenSuperHub {
     static TaskEx omenKeyListenerTask;
     static int shutdownStarted = 0;
     static int advancedStatusTick = 0;
+    static int advancedStatusRefreshInProgress = 0;
     static volatile bool checkFloating = false;
     static volatile bool isShuttingDown = false;
 
@@ -1306,7 +1307,7 @@ namespace OmenSuperHub {
         CPUPower = openPowerCPU;
 
       if (advancedStatusTick <= 0) {
-        RefreshAdvancedHardwareStatus();
+        ScheduleAdvancedHardwareStatusRefresh();
         advancedStatusTick = 4;
       } else {
         advancedStatusTick--;
@@ -1443,48 +1444,77 @@ namespace OmenSuperHub {
       File.WriteAllLines(filePath, lines);
     }
 
+    static void ScheduleAdvancedHardwareStatusRefresh() {
+      if (Interlocked.Exchange(ref advancedStatusRefreshInProgress, 1) != 0)
+        return;
+
+      TaskEx.Run(() => {
+        try {
+          RefreshAdvancedHardwareStatus();
+        } finally {
+          Interlocked.Exchange(ref advancedStatusRefreshInProgress, 0);
+        }
+      });
+    }
+
     static void RefreshAdvancedHardwareStatus() {
+      OmenGfxMode nextGfxMode = currentGfxMode;
+      OmenGpuStatus nextGpuStatus = currentGpuStatus;
+      OmenSystemDesignData nextSystemDesignData = currentSystemDesignData;
+      OmenSmartAdapterStatus nextSmartAdapterStatus = currentSmartAdapterStatus;
+      OmenFanTypeInfo nextFanTypeInfo = currentFanTypeInfo;
+      OmenKeyboardType nextKeyboardType = currentKeyboardType;
+      BatteryTelemetry nextBatteryTelemetry = currentBatteryTelemetry;
+
       try {
-        currentGfxMode = GetGraphicsMode();
+        nextGfxMode = GetGraphicsMode();
       } catch {
       }
 
       try {
         var gpuStatus = GetGpuStatus();
         if (gpuStatus != null)
-          currentGpuStatus = gpuStatus;
+          nextGpuStatus = gpuStatus;
       } catch {
       }
 
       try {
         var designData = GetSystemDesignData();
         if (designData != null)
-          currentSystemDesignData = designData;
+          nextSystemDesignData = designData;
       } catch {
       }
 
       try {
-        currentSmartAdapterStatus = GetSmartAdapterStatus();
+        nextSmartAdapterStatus = GetSmartAdapterStatus();
       } catch {
       }
 
       try {
         var fanTypeInfo = GetFanTypeInfo();
         if (fanTypeInfo != null)
-          currentFanTypeInfo = fanTypeInfo;
+          nextFanTypeInfo = fanTypeInfo;
       } catch {
       }
 
       try {
-        currentKeyboardType = GetKeyboardType();
+        nextKeyboardType = GetKeyboardType();
       } catch {
       }
 
       try {
-        currentBatteryTelemetry = ReadBatteryTelemetry();
+        nextBatteryTelemetry = ReadBatteryTelemetry();
       } catch {
-        currentBatteryTelemetry = null;
+        nextBatteryTelemetry = null;
       }
+
+      currentGfxMode = nextGfxMode;
+      currentGpuStatus = nextGpuStatus;
+      currentSystemDesignData = nextSystemDesignData;
+      currentSmartAdapterStatus = nextSmartAdapterStatus;
+      currentFanTypeInfo = nextFanTypeInfo;
+      currentKeyboardType = nextKeyboardType;
+      currentBatteryTelemetry = nextBatteryTelemetry;
     }
 
     static BatteryTelemetry ReadBatteryTelemetry() {
