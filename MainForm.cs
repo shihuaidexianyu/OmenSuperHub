@@ -4,12 +4,8 @@ using System.Windows.Forms;
 
 namespace OmenSuperHub {
   public partial class MainForm : Form {
-    private sealed class BufferedPanel : Panel {
-      public BufferedPanel() {
-        DoubleBuffered = true;
-        ResizeRedraw = true;
-      }
-    }
+    private const int WmEnterSizeMove = 0x0231;
+    private const int WmExitSizeMove = 0x0232;
 
     private sealed class BufferedTableLayoutPanel : TableLayoutPanel {
       public BufferedTableLayoutPanel() {
@@ -18,47 +14,66 @@ namespace OmenSuperHub {
       }
     }
 
+    private sealed class BufferedPanel : Panel {
+      public BufferedPanel() {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+      }
+    }
+
     private static MainForm _instance;
 
     private readonly System.Windows.Forms.Timer refreshTimer;
-    private Label heroPowerLabel;
-    private Label heroSourceLabel;
-    private Label cpuTempLabel;
-    private Label cpuPowerLabel;
-    private Label gpuTempLabel;
-    private Label gpuPowerLabel;
-    private Label batteryLabel;
-    private Label batteryDetailLabel;
-    private Label statusMuxLabel;
-    private Label statusAdapterLabel;
-    private Label statusFanLabel;
-    private Label statusPolicyLabel;
-    private Label statusGpuCtlLabel;
-    private Label statusCapabilitiesLabel;
+    private bool suppressRefresh;
+
+    private Label titleValueLabel;
+    private Label subtitleValueLabel;
+    private Label cpuTempValueLabel;
+    private Label cpuPowerValueLabel;
+    private Label gpuTempValueLabel;
+    private Label gpuPowerValueLabel;
+    private Label batteryPowerValueLabel;
+    private Label batteryDetailValueLabel;
+    private ProgressBar batteryProgressBar;
+    private Label muxValueLabel;
+    private Label adapterValueLabel;
+    private Label fanValueLabel;
+    private Label policyValueLabel;
+    private Label gpuCtlValueLabel;
+    private Label capabilityValueLabel;
     private TextBox telemetryTextBox;
     private TextBox configTextBox;
-    private ProgressBar batteryProgressBar;
 
     public MainForm() {
       Text = "OmenSuperHub";
       StartPosition = FormStartPosition.CenterScreen;
-      MinimumSize = new Size(980, 680);
-      Size = new Size(1120, 760);
-      BackColor = Color.FromArgb(242, 236, 226);
+      MinimumSize = new Size(980, 700);
+      Size = new Size(1120, 780);
+      BackColor = Color.FromArgb(243, 239, 231);
       Icon = Properties.Resources.fan;
       Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
 
-      SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+      SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
       UpdateStyles();
 
       BuildLayout();
 
       refreshTimer = new System.Windows.Forms.Timer();
-      refreshTimer.Interval = 1200;
-      refreshTimer.Tick += (s, e) => RefreshDashboard();
+      refreshTimer.Interval = 1500;
+      refreshTimer.Tick += (s, e) => {
+        if (!suppressRefresh && Visible && WindowState != FormWindowState.Minimized) {
+          RefreshDashboard();
+        }
+      };
       refreshTimer.Start();
 
       Shown += (s, e) => RefreshDashboard();
+      VisibleChanged += (s, e) => refreshTimer.Enabled = Visible;
+      Activated += (s, e) => {
+        if (Visible) {
+          RefreshDashboard();
+        }
+      };
       FormClosing += MainForm_FormClosing;
     }
 
@@ -68,17 +83,17 @@ namespace OmenSuperHub {
       var root = new BufferedTableLayoutPanel {
         Dock = DockStyle.Fill,
         BackColor = BackColor,
-        Padding = new Padding(20),
         ColumnCount = 1,
-        RowCount = 3
+        RowCount = 3,
+        Padding = new Padding(20)
       };
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 250));
-      root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
+      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220F));
+      root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       root.Controls.Add(BuildHeader(), 0, 0);
-      root.Controls.Add(BuildOverviewArea(), 0, 1);
-      root.Controls.Add(BuildDetailsArea(), 0, 2);
+      root.Controls.Add(BuildTopSection(), 0, 1);
+      root.Controls.Add(BuildBottomSection(), 0, 2);
 
       Controls.Add(root);
       ResumeLayout(true);
@@ -87,53 +102,54 @@ namespace OmenSuperHub {
     private Control BuildHeader() {
       var panel = new BufferedPanel {
         Dock = DockStyle.Fill,
-        BackColor = Color.FromArgb(59, 47, 38),
-        Padding = new Padding(24, 20, 24, 20),
-        Margin = new Padding(0, 0, 0, 14)
+        BackColor = Color.FromArgb(60, 47, 38),
+        Margin = new Padding(0, 0, 0, 14),
+        Padding = new Padding(22, 16, 22, 16)
       };
 
       var titleLabel = new Label {
         AutoSize = true,
         Text = "功率与热状态面板",
-        Font = new Font("Microsoft YaHei UI", 22F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(250, 243, 235),
-        Location = new Point(20, 18)
+        Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(250, 242, 234),
+        Location = new Point(18, 12)
       };
 
-      heroPowerLabel = new Label {
+      titleValueLabel = new Label {
         AutoSize = true,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 24F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(255, 188, 97),
-        Location = new Point(22, 58)
+        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(255, 186, 92),
+        Location = new Point(20, 48)
       };
 
-      heroSourceLabel = new Label {
-        AutoSize = true,
+      subtitleValueLabel = new Label {
+        AutoEllipsis = true,
         Text = "正在收集硬件状态...",
-        Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(216, 202, 184),
-        Location = new Point(26, 92)
+        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
+        ForeColor = Color.FromArgb(214, 200, 181),
+        Location = new Point(220, 56),
+        Size = new Size(520, 22)
       };
 
       var refreshButton = CreateHeaderButton("立即刷新", Color.FromArgb(212, 117, 43));
       refreshButton.Click += (s, e) => RefreshDashboard();
-      refreshButton.Location = new Point(820, 26);
 
-      var hideButton = CreateHeaderButton("隐藏到托盘", Color.FromArgb(109, 92, 76));
+      var hideButton = CreateHeaderButton("隐藏到托盘", Color.FromArgb(113, 93, 74));
       hideButton.Click += (s, e) => Hide();
-      hideButton.Location = new Point(938, 26);
 
       panel.Resize += (s, e) => {
-        hideButton.Left = panel.ClientSize.Width - hideButton.Width - 20;
-        refreshButton.Left = hideButton.Left - refreshButton.Width - 10;
+        hideButton.Location = new Point(panel.ClientSize.Width - hideButton.Width - 16, 26);
+        refreshButton.Location = new Point(hideButton.Left - refreshButton.Width - 10, 26);
+        subtitleValueLabel.Width = Math.Max(220, refreshButton.Left - subtitleValueLabel.Left - 16);
       };
 
       panel.Controls.Add(titleLabel);
-      panel.Controls.Add(heroPowerLabel);
-      panel.Controls.Add(heroSourceLabel);
+      panel.Controls.Add(titleValueLabel);
+      panel.Controls.Add(subtitleValueLabel);
       panel.Controls.Add(refreshButton);
       panel.Controls.Add(hideButton);
+
       return panel;
     }
 
@@ -150,23 +166,23 @@ namespace OmenSuperHub {
       return button;
     }
 
-    private Control BuildOverviewArea() {
-      var grid = new BufferedTableLayoutPanel {
+    private Control BuildTopSection() {
+      var split = new BufferedTableLayoutPanel {
         Dock = DockStyle.Fill,
-        BackColor = Color.Transparent,
         ColumnCount = 2,
         RowCount = 1,
+        BackColor = Color.Transparent,
         Margin = new Padding(0, 0, 0, 14)
       };
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52F));
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48F));
+      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 53F));
+      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 47F));
 
-      grid.Controls.Add(BuildMetricPanel(), 0, 0);
-      grid.Controls.Add(BuildStatusPanel(), 1, 0);
-      return grid;
+      split.Controls.Add(BuildMetricGrid(), 0, 0);
+      split.Controls.Add(BuildStatusCard(), 1, 0);
+      return split;
     }
 
-    private Control BuildMetricPanel() {
+    private Control BuildMetricGrid() {
       var grid = new BufferedTableLayoutPanel {
         Dock = DockStyle.Fill,
         ColumnCount = 2,
@@ -175,208 +191,252 @@ namespace OmenSuperHub {
         BackColor = Color.Transparent
       };
 
-      for (int i = 0; i < 2; i++) {
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      }
-      for (int i = 0; i < 3; i++) {
-        grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33.333F));
-      }
+      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
+      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 40F));
 
-      grid.Controls.Add(CreateMetricCard("CPU 温度", "0.0 °C", Color.FromArgb(24, 103, 160), out cpuTempLabel), 0, 0);
-      grid.Controls.Add(CreateMetricCard("CPU 功率", "0.0 W", Color.FromArgb(226, 118, 50), out cpuPowerLabel), 1, 0);
-      grid.Controls.Add(CreateMetricCard("GPU 温度", "0.0 °C", Color.FromArgb(35, 125, 88), out gpuTempLabel), 0, 1);
-      grid.Controls.Add(CreateMetricCard("GPU 功率", "0.0 W", Color.FromArgb(121, 77, 154), out gpuPowerLabel), 1, 1);
-      grid.Controls.Add(CreateBatteryCard(), 0, 2);
-      grid.SetColumnSpan(grid.GetControlFromPosition(0, 2), 2);
+      grid.Controls.Add(CreateMetricCard("CPU 温度", out cpuTempValueLabel, Color.FromArgb(26, 103, 159)), 0, 0);
+      grid.Controls.Add(CreateMetricCard("CPU 功率", out cpuPowerValueLabel, Color.FromArgb(222, 118, 46)), 1, 0);
+      grid.Controls.Add(CreateMetricCard("GPU 温度", out gpuTempValueLabel, Color.FromArgb(35, 123, 86)), 0, 1);
+      grid.Controls.Add(CreateMetricCard("GPU 功率", out gpuPowerValueLabel, Color.FromArgb(119, 76, 152)), 1, 1);
+
+      var batteryCard = CreateBatteryCard();
+      grid.Controls.Add(batteryCard, 0, 2);
+      grid.SetColumnSpan(batteryCard, 2);
 
       return grid;
     }
 
-    private Control BuildStatusPanel() {
-      var panel = CreateCardContainer(new Padding(18));
-      panel.Margin = new Padding(10, 0, 0, 0);
+    private Control BuildStatusCard() {
+      var card = CreateCard();
+      card.Margin = new Padding(10, 0, 0, 0);
 
-      var titleLabel = new Label {
-        AutoSize = true,
-        Text = "系统状态",
-        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(61, 49, 39),
-        Location = new Point(18, 16)
+      var layout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        ColumnCount = 2,
+        RowCount = 7,
+        BackColor = Color.White,
+        Padding = new Padding(18, 16, 18, 16)
       };
+      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
+      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      for (int i = 1; i < 7; i++) {
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+      }
 
-      statusMuxLabel = CreateStatusLine(panel, "显卡模式", 54);
-      statusAdapterLabel = CreateStatusLine(panel, "供电/适配器", 86);
-      statusFanLabel = CreateStatusLine(panel, "风扇", 118);
-      statusPolicyLabel = CreateStatusLine(panel, "策略", 150);
-      statusGpuCtlLabel = CreateStatusLine(panel, "GPU 控制", 182);
-      statusCapabilitiesLabel = CreateStatusLine(panel, "能力", 214);
+      var title = new Label {
+        AutoSize = true,
+        Text = "系统状态摘要",
+        Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(62, 50, 40)
+      };
+      layout.Controls.Add(title, 0, 0);
+      layout.SetColumnSpan(title, 2);
 
-      panel.Controls.Add(titleLabel);
-      return panel;
+      muxValueLabel = AddStatusRow(layout, 1, "显卡模式");
+      adapterValueLabel = AddStatusRow(layout, 2, "供电/适配器");
+      fanValueLabel = AddStatusRow(layout, 3, "风扇");
+      policyValueLabel = AddStatusRow(layout, 4, "策略");
+      gpuCtlValueLabel = AddStatusRow(layout, 5, "GPU 控制");
+      capabilityValueLabel = AddStatusRow(layout, 6, "能力");
+
+      card.Controls.Add(layout);
+      return card;
     }
 
-    private Label CreateStatusLine(Control parent, string label, int top) {
+    private Label AddStatusRow(TableLayoutPanel layout, int row, string key) {
       var keyLabel = new Label {
         AutoSize = true,
-        Text = label,
+        Text = key,
         Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(130, 107, 85),
-        Location = new Point(18, top)
+        ForeColor = Color.FromArgb(134, 108, 83),
+        Anchor = AnchorStyles.Left
       };
 
       var valueLabel = new Label {
-        AutoEllipsis = true,
-        Width = Math.Max(240, parent.Width - 36),
-        Height = 24,
+        Dock = DockStyle.Fill,
         Text = "--",
-        Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(48, 39, 31),
-        Location = new Point(140, top - 2)
+        AutoEllipsis = true,
+        Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular),
+        ForeColor = Color.FromArgb(50, 39, 30),
+        TextAlign = ContentAlignment.MiddleLeft
       };
 
-      parent.Resize += (s, e) => {
-        valueLabel.Width = Math.Max(180, parent.ClientSize.Width - 156);
-      };
-
-      parent.Controls.Add(keyLabel);
-      parent.Controls.Add(valueLabel);
+      layout.Controls.Add(keyLabel, 0, row);
+      layout.Controls.Add(valueLabel, 1, row);
       return valueLabel;
     }
 
-    private Control BuildDetailsArea() {
-      var grid = new BufferedTableLayoutPanel {
+    private Control CreateMetricCard(string title, out Label valueLabel, Color accentColor) {
+      var card = CreateCard();
+      card.Margin = new Padding(0, 0, 10, 10);
+
+      var layout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        ColumnCount = 1,
+        RowCount = 3,
+        BackColor = Color.White,
+        Padding = new Padding(16, 0, 16, 12)
+      };
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+      var accent = new Panel {
+        Dock = DockStyle.Fill,
+        BackColor = accentColor,
+        Margin = new Padding(0)
+      };
+
+      var titleLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = title,
+        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(135, 108, 82),
+        TextAlign = ContentAlignment.BottomLeft
+      };
+
+      valueLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = "--",
+        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(49, 39, 30),
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoEllipsis = true
+      };
+
+      layout.Controls.Add(accent, 0, 0);
+      layout.Controls.Add(titleLabel, 0, 1);
+      layout.Controls.Add(valueLabel, 0, 2);
+      card.Controls.Add(layout);
+      return card;
+    }
+
+    private Control CreateBatteryCard() {
+      var card = CreateCard();
+      card.Margin = new Padding(0);
+
+      var layout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        ColumnCount = 1,
+        RowCount = 5,
+        BackColor = Color.White,
+        Padding = new Padding(16, 0, 16, 14)
+      };
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
+
+      var accent = new Panel {
+        Dock = DockStyle.Fill,
+        BackColor = Color.FromArgb(183, 127, 46),
+        Margin = new Padding(0)
+      };
+
+      var titleLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = "电池功率与容量",
+        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(135, 108, 82),
+        TextAlign = ContentAlignment.BottomLeft
+      };
+
+      batteryPowerValueLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = "--",
+        Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(49, 39, 30),
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoEllipsis = true
+      };
+
+      batteryDetailValueLabel = new Label {
+        Dock = DockStyle.Fill,
+        Text = "--",
+        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
+        ForeColor = Color.FromArgb(112, 90, 68),
+        TextAlign = ContentAlignment.MiddleLeft,
+        AutoEllipsis = true
+      };
+
+      batteryProgressBar = new ProgressBar {
+        Dock = DockStyle.Fill,
+        Maximum = 100,
+        Style = ProgressBarStyle.Continuous,
+        Margin = new Padding(0, 2, 0, 0)
+      };
+
+      layout.Controls.Add(accent, 0, 0);
+      layout.Controls.Add(titleLabel, 0, 1);
+      layout.Controls.Add(batteryPowerValueLabel, 0, 2);
+      layout.Controls.Add(batteryDetailValueLabel, 0, 3);
+      layout.Controls.Add(batteryProgressBar, 0, 4);
+      card.Controls.Add(layout);
+      return card;
+    }
+
+    private Control BuildBottomSection() {
+      var split = new BufferedTableLayoutPanel {
         Dock = DockStyle.Fill,
         ColumnCount = 2,
         RowCount = 1,
         BackColor = Color.Transparent
       };
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
       telemetryTextBox = CreateDetailsBox();
       configTextBox = CreateDetailsBox();
 
-      grid.Controls.Add(CreateDetailSection("实时遥测", telemetryTextBox), 0, 0);
-      grid.Controls.Add(CreateDetailSection("运行配置", configTextBox), 1, 0);
+      var telemetryCard = CreateDetailsCard("实时遥测", telemetryTextBox);
+      telemetryCard.Margin = new Padding(0, 0, 10, 0);
+      var configCard = CreateDetailsCard("运行配置", configTextBox);
+      configCard.Margin = new Padding(10, 0, 0, 0);
 
-      return grid;
+      split.Controls.Add(telemetryCard, 0, 0);
+      split.Controls.Add(configCard, 1, 0);
+      return split;
     }
 
-    private BufferedPanel CreateMetricCard(string title, string initialValue, Color accentColor, out Label valueLabel) {
-      var panel = CreateCardContainer(new Padding(18, 16, 18, 16));
-      panel.Margin = new Padding(0, 0, 0, 10);
+    private Control CreateDetailsCard(string title, TextBox textBox) {
+      var card = CreateCard();
 
-      var accent = new Panel {
-        Dock = DockStyle.Top,
-        Height = 5,
-        BackColor = accentColor
+      var layout = new BufferedTableLayoutPanel {
+        Dock = DockStyle.Fill,
+        ColumnCount = 1,
+        RowCount = 2,
+        BackColor = Color.White,
+        Padding = new Padding(16)
       };
+      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
       var titleLabel = new Label {
-        AutoSize = true,
+        Dock = DockStyle.Fill,
         Text = title,
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(135, 108, 82),
-        Location = new Point(18, 24)
+        Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold),
+        ForeColor = Color.FromArgb(62, 50, 40),
+        TextAlign = ContentAlignment.MiddleLeft
       };
 
-      valueLabel = new Label {
-        AutoSize = true,
-        Text = initialValue,
-        Font = new Font("Microsoft YaHei UI", 22F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(49, 39, 30),
-        Location = new Point(18, 52)
-      };
+      textBox.Dock = DockStyle.Fill;
 
-      panel.Controls.Add(accent);
-      panel.Controls.Add(titleLabel);
-      panel.Controls.Add(valueLabel);
-      return panel;
+      layout.Controls.Add(titleLabel, 0, 0);
+      layout.Controls.Add(textBox, 0, 1);
+      card.Controls.Add(layout);
+      return card;
     }
 
-    private BufferedPanel CreateBatteryCard() {
-      var panel = CreateCardContainer(new Padding(18, 16, 18, 16));
-      panel.Margin = new Padding(0);
-
-      var accent = new Panel {
-        Dock = DockStyle.Top,
-        Height = 5,
-        BackColor = Color.FromArgb(184, 127, 48)
-      };
-
-      var titleLabel = new Label {
-        AutoSize = true,
-        Text = "电池功率与容量",
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(135, 108, 82),
-        Location = new Point(18, 24)
-      };
-
-      batteryLabel = new Label {
-        AutoSize = true,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(49, 39, 30),
-        Location = new Point(18, 50)
-      };
-
-      batteryDetailLabel = new Label {
-        AutoSize = true,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(112, 90, 68),
-        Location = new Point(20, 94)
-      };
-
-      batteryProgressBar = new ProgressBar {
-        Width = 300,
-        Height = 18,
-        Location = new Point(20, 126),
-        Maximum = 100,
-        Style = ProgressBarStyle.Continuous
-      };
-
-      panel.Resize += (s, e) => {
-        batteryProgressBar.Width = Math.Max(180, panel.ClientSize.Width - 40);
-      };
-
-      panel.Controls.Add(accent);
-      panel.Controls.Add(titleLabel);
-      panel.Controls.Add(batteryLabel);
-      panel.Controls.Add(batteryDetailLabel);
-      panel.Controls.Add(batteryProgressBar);
-      return panel;
-    }
-
-    private static BufferedPanel CreateCardContainer(Padding padding) {
+    private static BufferedPanel CreateCard() {
       return new BufferedPanel {
         Dock = DockStyle.Fill,
-        BackColor = Color.White,
-        Padding = padding
+        BackColor = Color.White
       };
-    }
-
-    private Control CreateDetailSection(string title, TextBox textBox) {
-      var panel = CreateCardContainer(new Padding(18));
-      panel.Margin = new Padding(0, 0, 10, 0);
-
-      var titleLabel = new Label {
-        AutoSize = true,
-        Text = title,
-        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(61, 49, 39),
-        Location = new Point(18, 16)
-      };
-
-      textBox.Location = new Point(18, 50);
-      textBox.Size = new Size(Math.Max(300, panel.Width - 36), Math.Max(200, panel.Height - 68));
-      panel.Resize += (s, e) => {
-        textBox.Size = new Size(Math.Max(280, panel.ClientSize.Width - 36), Math.Max(180, panel.ClientSize.Height - 68));
-      };
-
-      panel.Controls.Add(titleLabel);
-      panel.Controls.Add(textBox);
-      return panel;
     }
 
     private static TextBox CreateDetailsBox() {
@@ -397,31 +457,34 @@ namespace OmenSuperHub {
       float? batteryPower = GetBatteryPower(snapshot.Battery);
       float totalPower = snapshot.CpuPowerWatts + (snapshot.MonitorGpu ? snapshot.GpuPowerWatts : 0F);
 
-      SetTextIfChanged(heroPowerLabel, $"{totalPower:F1} W");
-      SetTextIfChanged(heroSourceLabel, $"{(snapshot.AcOnline ? "交流电" : "电池")} | CPU {snapshot.CpuPowerWatts:F1}W | GPU {(snapshot.MonitorGpu ? snapshot.GpuPowerWatts.ToString("F1") : "--")}W");
-      SetTextIfChanged(cpuTempLabel, $"{snapshot.CpuTemperature:F1} °C");
-      SetTextIfChanged(cpuPowerLabel, $"{snapshot.CpuPowerWatts:F1} W");
-      SetTextIfChanged(gpuTempLabel, snapshot.MonitorGpu ? $"{snapshot.GpuTemperature:F1} °C" : "关闭");
-      SetTextIfChanged(gpuPowerLabel, snapshot.MonitorGpu ? $"{snapshot.GpuPowerWatts:F1} W" : "--");
-      SetTextIfChanged(batteryLabel, batteryPower.HasValue ? $"{batteryPower.Value:F1} W" : "无功率读数");
-      SetTextIfChanged(batteryDetailLabel, BuildBatteryDetail(snapshot, batteryPower));
-      batteryProgressBar.Value = Math.Max(0, Math.Min(100, snapshot.BatteryPercent));
+      SetTextIfChanged(titleValueLabel, $"{totalPower:F1} W");
+      SetTextIfChanged(subtitleValueLabel, $"{(snapshot.AcOnline ? "交流电" : "电池")} | CPU {snapshot.CpuPowerWatts:F1}W | GPU {(snapshot.MonitorGpu ? snapshot.GpuPowerWatts.ToString("F1") : "--")}W");
 
-      SetTextIfChanged(statusMuxLabel, FormatGraphicsMode(snapshot.GraphicsMode));
-      SetTextIfChanged(statusAdapterLabel, $"{FormatAdapterStatus(snapshot.SmartAdapterStatus)} / {(snapshot.AcOnline ? "AC" : "Battery")}");
-      SetTextIfChanged(statusFanLabel, snapshot.MonitorFan ? $"{snapshot.FanSpeeds[0] * 100}/{snapshot.FanSpeeds[1] * 100} RPM" : "监控关闭");
-      SetTextIfChanged(statusPolicyLabel, $"{snapshot.FanMode} | CPU {snapshot.CpuPowerSetting} | GPU {snapshot.GpuPowerSetting}");
-      SetTextIfChanged(statusGpuCtlLabel, FormatGpuControl(snapshot.GpuStatus));
-      SetTextIfChanged(statusCapabilitiesLabel, BuildCapabilitySummary(snapshot));
+      SetTextIfChanged(cpuTempValueLabel, $"{snapshot.CpuTemperature:F1} °C");
+      SetTextIfChanged(cpuPowerValueLabel, $"{snapshot.CpuPowerWatts:F1} W");
+      SetTextIfChanged(gpuTempValueLabel, snapshot.MonitorGpu ? $"{snapshot.GpuTemperature:F1} °C" : "监控关闭");
+      SetTextIfChanged(gpuPowerValueLabel, snapshot.MonitorGpu ? $"{snapshot.GpuPowerWatts:F1} W" : "--");
+      SetTextIfChanged(batteryPowerValueLabel, batteryPower.HasValue ? $"{batteryPower.Value:F1} W" : "无功率读数");
+      SetTextIfChanged(batteryDetailValueLabel, BuildBatteryDetail(snapshot, batteryPower));
+
+      int batteryPercent = Math.Max(0, Math.Min(100, snapshot.BatteryPercent));
+      if (batteryProgressBar.Value != batteryPercent)
+        batteryProgressBar.Value = batteryPercent;
+
+      SetTextIfChanged(muxValueLabel, FormatGraphicsMode(snapshot.GraphicsMode));
+      SetTextIfChanged(adapterValueLabel, $"{FormatAdapterStatus(snapshot.SmartAdapterStatus)} / {(snapshot.AcOnline ? "AC" : "Battery")}");
+      SetTextIfChanged(fanValueLabel, snapshot.MonitorFan ? $"{snapshot.FanSpeeds[0] * 100}/{snapshot.FanSpeeds[1] * 100} RPM" : "监控关闭");
+      SetTextIfChanged(policyValueLabel, $"{snapshot.FanMode} | CPU {snapshot.CpuPowerSetting} | GPU {snapshot.GpuPowerSetting}");
+      SetTextIfChanged(gpuCtlValueLabel, FormatGpuControl(snapshot.GpuStatus));
+      SetTextIfChanged(capabilityValueLabel, BuildCapabilitySummary(snapshot));
 
       SetTextIfChanged(telemetryTextBox, BuildTelemetryText(snapshot, batteryPower));
       SetTextIfChanged(configTextBox, BuildConfigText(snapshot));
     }
 
     private static void SetTextIfChanged(Control control, string text) {
-      if (control.Text != text) {
+      if (control.Text != text)
         control.Text = text;
-      }
     }
 
     private static float? GetBatteryPower(Program.BatteryTelemetry battery) {
@@ -537,6 +600,17 @@ namespace OmenSuperHub {
       string gfxSwitch = snapshot.SystemDesignData.GraphicsSwitcherSupported ? "GfxSwitch" : "No GfxSwitch";
       string fan = snapshot.SystemDesignData.SoftwareFanControlSupported ? "SW Fan" : "BIOS Fan";
       return $"{gfxSwitch} | {fan} | PL4 {snapshot.SystemDesignData.DefaultPl4}W";
+    }
+
+    protected override void WndProc(ref Message m) {
+      if (m.Msg == WmEnterSizeMove) {
+        suppressRefresh = true;
+      } else if (m.Msg == WmExitSizeMove) {
+        suppressRefresh = false;
+        RefreshDashboard();
+      }
+
+      base.WndProc(ref m);
     }
 
     private void MainForm_FormClosing(object sender, FormClosingEventArgs e) {
