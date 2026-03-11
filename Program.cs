@@ -11,6 +11,7 @@ using System.Reflection;
 using Microsoft.Win32;
 using System.Text.RegularExpressions;
 using System.Drawing;
+using System.Threading.Tasks;
 //using OpenComputer = OpenHardwareMonitor.Hardware.Computer;
 //using OpenIHardware = OpenHardwareMonitor.Hardware.IHardware;
 //using OpenHardwareType = OpenHardwareMonitor.Hardware.HardwareType;
@@ -40,16 +41,23 @@ namespace OmenSuperHub {
     static string fanTable = "silent", fanMode = "performance", fanControl = "auto", tempSensitivity = "high", cpuPower = "max", gpuPower = "max", autoStart = "off", customIcon = "original", floatingBar = "off", floatingBarLoc = "left", omenKey = "default";
     //static OpenComputer openComputer = new OpenComputer() { CPUEnabled = true };
     static LibreComputer libreComputer = new LibreComputer() { IsCpuEnabled = true, IsGpuEnabled = true };
-    static bool openLib = true, monitorGPU = true, monitorFan = true, isConnectedToNVIDIA = true, powerOnline = true, checkFloating = false;
+    static bool openLib = true, monitorGPU = true, monitorFan = true, isConnectedToNVIDIA = true, powerOnline = true;
     static List<int> fanSpeedNow = new List<int> { 20, 23 };
     static float respondSpeed = 0.4f;
     static Dictionary<float, List<int>> CPUTempFanMap = new Dictionary<float, List<int>>();
     static Dictionary<float, List<int>> GPUTempFanMap = new Dictionary<float, List<int>>();
+    static readonly object fanMapLock = new object();
+    static readonly object floatingFormLock = new object();
     static System.Threading.Timer fanControlTimer;
-    static System.Timers.Timer tooltipUpdateTimer; // Timer for updating tooltip
+    static System.Windows.Forms.Timer tooltipUpdateTimer;
     static System.Windows.Forms.Timer checkFloatingTimer, optimiseTimer;
     static NotifyIcon trayIcon;
     static FloatingForm floatingForm;
+    static NamedPipeServerStream omenKeyPipeServer;
+    static Task omenKeyListenerTask;
+    static int shutdownStarted = 0;
+    static volatile bool checkFloating = false;
+    static volatile bool isShuttingDown = false;
 
     [STAThread]
     static void Main(string[] args) {
@@ -65,6 +73,7 @@ namespace OmenSuperHub {
 
         AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(CurrentDomain_UnhandledException);
         Application.ThreadException += new ThreadExceptionEventHandler(Application_ThreadException);
+        Application.ApplicationExit += new EventHandler(OnApplicationExit);
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -90,6 +99,10 @@ namespace OmenSuperHub {
 
         // Main loop to query CPU and GPU temperature every second
         fanControlTimer = new System.Threading.Timer((e) => {
+          if (isShuttingDown) {
+            return;
+          }
+
           int fanSpeed1 = GetFanSpeedForTemperature(0) / 100;
           int fanSpeed2 = GetFanSpeedForTemperature(1) / 100;
           if (monitorFan) {
@@ -202,7 +215,6 @@ namespace OmenSuperHub {
       GetFanCount();
       //更新显示器连接到显卡状态
       monitorQuery();
-      GC.Collect();
     }
 
     static void OnPowerChange(object s, PowerModeChangedEventArgs e) {
@@ -610,7 +622,7 @@ namespace OmenSuperHub {
       ToolStripMenuItem omenKeyMenu = new ToolStripMenuItem("Omen键");
       omenKeyMenu.DropDownItems.Add(CreateMenuItem("默认", "omenKeyGroup", (s, e) => {
         omenKey = "default";
-        tooltipUpdateTimer.Enabled = false;
+        checkFloatingTimer.Enabled = false;
         OmenKeyOff();
         OmenKeyOn(omenKey);
         SaveConfig("OmenKey");
@@ -665,9 +677,9 @@ namespace OmenSuperHub {
       trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("退出", null, (s, e) => Exit(), false));
 
       // Initialize tooltip update timer
-      tooltipUpdateTimer = new System.Timers.Timer(1000); // Set interval to 1 second
-      tooltipUpdateTimer.Elapsed += (s, e) => UpdateTooltip();
-      tooltipUpdateTimer.AutoReset = true; // Ensure the timer keeps running
+      tooltipUpdateTimer = new System.Windows.Forms.Timer();
+      tooltipUpdateTimer.Interval = 1000;
+      tooltipUpdateTimer.Tick += (s, e) => UpdateTooltip();
       tooltipUpdateTimer.Start();
     }
 
@@ -1094,6 +1106,10 @@ namespace OmenSuperHub {
 
     // 状态栏定时更新任务+硬件查询+DB解锁
     static void UpdateTooltip() {
+      if (isShuttingDown) {
+        return;
+      }
+
       QueryHarware();
       if (monitorFan)
         fanSpeedNow = GetFanLevel();
@@ -1331,7 +1347,7 @@ namespace OmenSuperHub {
       float targetMin = 50.0f;
       float targetMax = 97.0f;
 
-      lock (CPUTempFanMap) {
+      lock (fanMapLock) {
         CPUTempFanMap.Clear();
         GPUTempFanMap.Clear();
 
@@ -1365,9 +1381,12 @@ namespace OmenSuperHub {
       }
 
       // 保存配置文件，只包含最小和最大温度对应的行
-      var lines = new List<string> { "CPU,Fan1,Fan2,GPU,Fan1,Fan2" };
-      lines.AddRange(CPUTempFanMap.Select(kvp =>
-          $"{kvp.Key:F0},{kvp.Value[0]},{kvp.Value[1]},{kvp.Key - 10.0:F0},{kvp.Value[0]},{kvp.Value[1]}"));
+      List<string> lines;
+      lock (fanMapLock) {
+        lines = new List<string> { "CPU,Fan1,Fan2,GPU,Fan1,Fan2" };
+        lines.AddRange(CPUTempFanMap.Select(kvp =>
+            $"{kvp.Key:F0},{kvp.Value[0]},{kvp.Value[1]},{kvp.Key - 10.0:F0},{kvp.Value[0]},{kvp.Value[1]}"));
+      }
       File.WriteAllLines(filePath, lines);
     }
 
@@ -1377,7 +1396,7 @@ namespace OmenSuperHub {
         silentCoef = 0.8f;
       string absoluteFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, filePath);
       if (File.Exists(absoluteFilePath)) {
-        lock (CPUTempFanMap) {
+        lock (fanMapLock) {
           CPUTempFanMap.Clear();
           GPUTempFanMap.Clear();
         }
@@ -1395,7 +1414,7 @@ namespace OmenSuperHub {
                 int.TryParse(parts[5], out int gpuFan2Speed)) {
 
               // 将风扇速度以列表的形式存储在 CPUTempFanMap 和 GPUTempFanMap 中
-              lock (CPUTempFanMap) {
+              lock (fanMapLock) {
                 CPUTempFanMap[cpuTemp] = new List<int> { cpuFan1Speed, cpuFan2Speed };
                 GPUTempFanMap[gpuTemp] = new List<int> { gpuFan1Speed, gpuFan2Speed };
               }
@@ -1415,7 +1434,8 @@ namespace OmenSuperHub {
 
     // Generate default temperature-fan speed mapping
     static void GenerateDefaultMapping(string filePath) {
-      lock (CPUTempFanMap) {
+      List<string> lines;
+      lock (fanMapLock) {
         CPUTempFanMap.Clear();
         CPUTempFanMap[30] = new List<int> { 0, 0 };
         CPUTempFanMap[50] = new List<int> { 1600, 1900 };
@@ -1427,25 +1447,28 @@ namespace OmenSuperHub {
         foreach (var kvp in CPUTempFanMap) {
           GPUTempFanMap[kvp.Key - 10] = new List<int> { kvp.Value[0], kvp.Value[1] };
         }
+
+        lines = new List<string> { "CPU,Fan1,Fan2,GPU,Fan1,Fan2" };
+        lines.AddRange(CPUTempFanMap.Select(kvp =>
+            $"{kvp.Key:F0},{kvp.Value[0]},{kvp.Value[1]},{kvp.Key - 10:F0},{kvp.Value[0]},{kvp.Value[1]}"));
       }
-      var lines = new List<string> { "CPU,Fan1,Fan2,GPU,Fan1,Fan2" };
-      lines.AddRange(CPUTempFanMap.Select(kvp =>
-          $"{kvp.Key:F0},{kvp.Value[0]},{kvp.Value[1]},{kvp.Key - 10:F0},{kvp.Value[0]},{kvp.Value[1]}"));
       File.WriteAllLines(filePath, lines);
     }
 
     // Get fan speed for CPU and GPU and return the maximum
     static int GetFanSpeedForTemperature(int fanIndex) {
-      if (CPUTempFanMap.Count == 0 || GPUTempFanMap.Count == 0) return 0;
+      lock (fanMapLock) {
+        if (CPUTempFanMap.Count == 0 || GPUTempFanMap.Count == 0) return 0;
 
-      int cpuFanSpeed = GetFanSpeedForSpecificTemperature(CPUTemp, CPUTempFanMap, fanIndex);
+        int cpuFanSpeed = GetFanSpeedForSpecificTemperature(CPUTemp, CPUTempFanMap, fanIndex);
 
-      if (monitorGPU) {
-        int gpuFanSpeed = GetFanSpeedForSpecificTemperature(GPUTemp, GPUTempFanMap, fanIndex);
-        return Math.Max(cpuFanSpeed, gpuFanSpeed);
+        if (monitorGPU) {
+          int gpuFanSpeed = GetFanSpeedForSpecificTemperature(GPUTemp, GPUTempFanMap, fanIndex);
+          return Math.Max(cpuFanSpeed, gpuFanSpeed);
+        }
+
+        return cpuFanSpeed;
       }
-
-      return cpuFanSpeed;
     }
 
     // Helper function to calculate fan speed for a specific temperature map
@@ -1786,6 +1809,10 @@ namespace OmenSuperHub {
     }
 
     static void HandleFloatingBarToggle() {
+      if (isShuttingDown) {
+        return;
+      }
+
       if (checkFloating) {
         checkFloating = false;
         try {
@@ -1810,17 +1837,31 @@ namespace OmenSuperHub {
     }
 
     static void getOmenKeyTask() {
-      System.Threading.Tasks.Task.Run(() => {
-        while (true) {
-          using (var pipeServer = new NamedPipeServerStream("OmenSuperHubPipe", PipeDirection.In)) {
-            pipeServer.WaitForConnection();
-            using (var reader = new StreamReader(pipeServer)) {
-              string message = reader.ReadToEnd();
-              if (message.Contains("OmenKeyTriggered")) {
-                if (!checkFloating)
+      omenKeyListenerTask = Task.Run(() => {
+        while (!isShuttingDown) {
+          try {
+            using (var pipeServer = new NamedPipeServerStream("OmenSuperHubPipe", PipeDirection.In)) {
+              omenKeyPipeServer = pipeServer;
+              pipeServer.WaitForConnection();
+              if (isShuttingDown) {
+                break;
+              }
+
+              using (var reader = new StreamReader(pipeServer)) {
+                string message = reader.ReadToEnd();
+                if (!string.IsNullOrEmpty(message) && message.Contains("OmenKeyTriggered")) {
                   checkFloating = true;
+                }
               }
             }
+          } catch (ObjectDisposedException) {
+            break;
+          } catch (IOException) {
+            if (isShuttingDown) {
+              break;
+            }
+          } finally {
+            omenKeyPipeServer = null;
           }
         }
       });
@@ -1828,11 +1869,11 @@ namespace OmenSuperHub {
 
     // 显示浮窗
     static void ShowFloatingForm() {
-      if (floatingForm == null || floatingForm.IsDisposed) {
-        floatingForm = new FloatingForm(monitorText(), textSize, floatingBarLoc);
-        floatingForm.Show();
-      } else {
-        lock (floatingForm) {
+      lock (floatingFormLock) {
+        if (floatingForm == null || floatingForm.IsDisposed) {
+          floatingForm = new FloatingForm(monitorText(), textSize, floatingBarLoc);
+          floatingForm.Show();
+        } else {
           floatingForm.BringToFront();
         }
       }
@@ -1840,8 +1881,8 @@ namespace OmenSuperHub {
 
     // 关闭浮窗
     static void CloseFloatingForm() {
-      if (floatingForm != null && !floatingForm.IsDisposed) {
-        lock (floatingForm) {
+      lock (floatingFormLock) {
+        if (floatingForm != null && !floatingForm.IsDisposed) {
           floatingForm.Close();
           floatingForm.Dispose();
           floatingForm = null;
@@ -1851,8 +1892,8 @@ namespace OmenSuperHub {
 
     // 更新浮窗的文字内容
     static void UpdateFloatingText() {
-      if (floatingForm != null && !floatingForm.IsDisposed) {
-        lock (floatingForm) {
+      lock (floatingFormLock) {
+        if (floatingForm != null && !floatingForm.IsDisposed) {
           floatingForm.TopMost = true;
           floatingForm.SetText(monitorText(), textSize, floatingBarLoc);
         }
@@ -1870,14 +1911,78 @@ namespace OmenSuperHub {
     }
 
     static void Exit() {
+      if (Interlocked.Exchange(ref shutdownStarted, 1) != 0) {
+        return;
+      }
+
+      isShuttingDown = true;
       if (omenKey == "custom") {
         OmenKeyOff();
       }
-      tooltipUpdateTimer.Stop(); // 停止定时器
+
+      SystemEvents.PowerModeChanged -= new PowerModeChangedEventHandler(OnPowerChange);
+      StopAndDisposeTimers();
+      DisposePipeServer();
+      CloseFloatingForm();
+      if (trayIcon != null) {
+        trayIcon.Visible = false;
+        trayIcon.Dispose();
+      }
 
       //openComputer.Close();
       libreComputer.Close();
       Application.Exit();
+    }
+
+    static void OnApplicationExit(object sender, EventArgs e) {
+      if (Interlocked.Exchange(ref shutdownStarted, 1) != 0) {
+        return;
+      }
+
+      isShuttingDown = true;
+      SystemEvents.PowerModeChanged -= new PowerModeChangedEventHandler(OnPowerChange);
+      StopAndDisposeTimers();
+      DisposePipeServer();
+      CloseFloatingForm();
+      if (trayIcon != null) {
+        trayIcon.Visible = false;
+        trayIcon.Dispose();
+      }
+
+      libreComputer.Close();
+    }
+
+    static void StopAndDisposeTimers() {
+      if (tooltipUpdateTimer != null) {
+        tooltipUpdateTimer.Stop();
+        tooltipUpdateTimer.Dispose();
+        tooltipUpdateTimer = null;
+      }
+
+      if (checkFloatingTimer != null) {
+        checkFloatingTimer.Stop();
+        checkFloatingTimer.Dispose();
+        checkFloatingTimer = null;
+      }
+
+      if (optimiseTimer != null) {
+        optimiseTimer.Stop();
+        optimiseTimer.Dispose();
+        optimiseTimer = null;
+      }
+
+      if (fanControlTimer != null) {
+        fanControlTimer.Dispose();
+        fanControlTimer = null;
+      }
+    }
+
+    static void DisposePipeServer() {
+      var pipeServer = omenKeyPipeServer;
+      omenKeyPipeServer = null;
+      if (pipeServer != null) {
+        pipeServer.Dispose();
+      }
     }
 
     static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e) {
@@ -1891,10 +1996,15 @@ namespace OmenSuperHub {
     }
 
     static void LogError(Exception ex) {
-      // Write exception details to a log file or other logging mechanism
-      string absoluteFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
-      File.AppendAllText(absoluteFilePath, DateTime.Now + ": " + ex.ToString() + Environment.NewLine);
-      MessageBox.Show("An unexpected error occurred. Please check the log file for details.");
+      try {
+        string absoluteFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
+        File.AppendAllText(absoluteFilePath, DateTime.Now + ": " + ex.ToString() + Environment.NewLine);
+      } catch {
+      }
+
+      if (!isShuttingDown) {
+        MessageBox.Show("An unexpected error occurred. Please check the log file for details.");
+      }
     }
   }
 }

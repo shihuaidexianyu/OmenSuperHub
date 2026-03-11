@@ -112,57 +112,81 @@ namespace OmenSuperHub {
 
     public static ManagementObjectSearcher searcher;
     public static ManagementObject biosMethods;
+    static readonly object biosLock = new object();
+
+    static void ResetBiosSession() {
+      if (biosMethods != null) {
+        biosMethods.Dispose();
+        biosMethods = null;
+      }
+
+      if (searcher != null) {
+        searcher.Dispose();
+        searcher = null;
+      }
+    }
+
     public static byte[] SendOmenBiosWmi(uint commandType, byte[] data, int outputSize, uint command = 0x20008) {
       const string namespaceName = @"root\wmi";
       const string className = "hpqBIntM";
       string methodName = "hpqBIOSInt" + outputSize.ToString(); // Change here
       byte[] sign = { 0x53, 0x45, 0x43, 0x55 };
 
-      // Prepare the request
-      using (var biosDataIn = new ManagementClass(namespaceName, "hpqBDataIn", null).CreateInstance()) {
-        biosDataIn["Command"] = command;
-        biosDataIn["CommandType"] = commandType;
-        biosDataIn["Sign"] = sign;
-        if (data != null) {
-          biosDataIn["hpqBData"] = data;
-          biosDataIn["Size"] = (uint)data.Length;
-        } else {
-          biosDataIn["Size"] = (uint)0;
-        }
+      lock (biosLock) {
+        try {
+          // Prepare the request
+          using (var biosDataIn = new ManagementClass(namespaceName, "hpqBDataIn", null).CreateInstance()) {
+            biosDataIn["Command"] = command;
+            biosDataIn["CommandType"] = commandType;
+            biosDataIn["Sign"] = sign;
+            if (data != null) {
+              biosDataIn["hpqBData"] = data;
+              biosDataIn["Size"] = (uint)data.Length;
+            } else {
+              biosDataIn["Size"] = (uint)0;
+            }
 
-        // Obtain BIOS method class instance
-        if (searcher == null)
-          searcher = new ManagementObjectSearcher(namespaceName, $"SELECT * FROM {className}");
-        if (biosMethods == null)
-          biosMethods = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
+            // Obtain BIOS method class instance
+            if (searcher == null)
+              searcher = new ManagementObjectSearcher(namespaceName, $"SELECT * FROM {className}");
+            if (biosMethods == null)
+              biosMethods = searcher.Get().Cast<ManagementObject>().FirstOrDefault();
+            if (biosMethods == null)
+              return null;
 
-        // Make a call to write to the BIOS
-        var inParams = biosMethods.GetMethodParameters(methodName); // Change here
-        inParams["InData"] = biosDataIn;
+            // Make a call to write to the BIOS
+            var inParams = biosMethods.GetMethodParameters(methodName); // Change here
+            inParams["InData"] = biosDataIn;
 
-        var result = biosMethods.InvokeMethod(methodName, inParams, null); // Change here
-        var outData = result["OutData"] as ManagementBaseObject;
-        uint returnCode = (uint)outData["rwReturnCode"];
+            var result = biosMethods.InvokeMethod(methodName, inParams, null); // Change here
+            var outData = result["OutData"] as ManagementBaseObject;
+            uint returnCode = (uint)outData["rwReturnCode"];
 
-        if (returnCode == 0) {
-          // If operation completed successfully
-          if (outputSize != 0) {
-            var outputData = (byte[])outData["Data"];
-            // Console.WriteLine("+ OK: " + BitConverter.ToString(outputData));
-            return (byte[])outData["Data"];
-          } else {
-            // Console.WriteLine("+ OK");
+            if (returnCode == 0) {
+              // If operation completed successfully
+              if (outputSize != 0) {
+                var outputData = (byte[])outData["Data"];
+                // Console.WriteLine("+ OK: " + BitConverter.ToString(outputData));
+                return outputData;
+              } else {
+                // Console.WriteLine("+ OK");
+              }
+            } else {
+              Console.WriteLine("- Failed: Error " + returnCode);
+              switch (returnCode) {
+                case 0x03:
+                  Console.WriteLine(" - Command Not Available");
+                  break;
+                case 0x05:
+                  Console.WriteLine(" - Input or Output Size Too Small");
+                  break;
+              }
+            }
           }
-        } else {
-          Console.WriteLine("- Failed: Error " + returnCode);
-          switch (returnCode) {
-            case 0x03:
-              Console.WriteLine(" - Command Not Available");
-              break;
-            case 0x05:
-              Console.WriteLine(" - Input or Output Size Too Small");
-              break;
-          }
+        } catch (Exception ex) {
+          ResetBiosSession();
+          Console.WriteLine("Error: " + ex.Message);
+          return null;
         }
       }
 
