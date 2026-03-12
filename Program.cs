@@ -51,9 +51,11 @@ namespace OmenSuperHub {
       public string FanMode { get; set; }
       public string FanControl { get; set; }
       public string FanTable { get; set; }
+      public string TempSensitivity { get; set; }
       public string CpuPowerSetting { get; set; }
       public string GpuPowerSetting { get; set; }
       public int GpuClockLimit { get; set; }
+      public bool FloatingBarEnabled { get; set; }
       public OmenGfxMode GraphicsMode { get; set; }
       public OmenGpuStatus GpuStatus { get; set; }
       public OmenSystemDesignData SystemDesignData { get; set; }
@@ -62,6 +64,114 @@ namespace OmenSuperHub {
       public OmenKeyboardType KeyboardType { get; set; }
       public BatteryTelemetry Battery { get; set; }
       public int BatteryPercent { get; set; }
+    }
+
+    internal static void ApplyFanModeSetting(string mode) {
+      if (mode == "performance") {
+        fanMode = "performance";
+        SetFanMode(0x31);
+      } else {
+        fanMode = "default";
+        SetFanMode(0x30);
+      }
+
+      RestoreCPUPower();
+      SaveConfig("FanMode");
+    }
+
+    internal static void ApplyFanControlSetting(string controlValue) {
+      if (controlValue == "auto") {
+        fanControl = "auto";
+        SetMaxFanSpeedOff();
+        fanControlTimer.Change(0, 1000);
+      } else if (controlValue == "max") {
+        fanControl = "max";
+        SetMaxFanSpeedOn();
+        fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
+      } else if (controlValue.EndsWith(" RPM")) {
+        fanControl = controlValue;
+        SetMaxFanSpeedOff();
+        fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        int rpmValue = int.Parse(controlValue.Replace(" RPM", "").Trim());
+        SetFanLevel(rpmValue / 100, rpmValue / 100);
+      }
+
+      SaveConfig("FanControl");
+    }
+
+    internal static void ApplyFanTableSetting(string value) {
+      fanTable = value == "cool" ? "cool" : "silent";
+      LoadFanConfig(fanTable == "cool" ? "cool.txt" : "silent.txt");
+      SaveConfig("FanTable");
+    }
+
+    internal static void ApplyTempSensitivitySetting(string value) {
+      tempSensitivity = value;
+      switch (value) {
+        case "realtime":
+          respondSpeed = 1f;
+          break;
+        case "medium":
+          respondSpeed = 0.1f;
+          break;
+        case "low":
+          respondSpeed = 0.04f;
+          break;
+        default:
+          tempSensitivity = "high";
+          respondSpeed = 0.4f;
+          break;
+      }
+
+      SaveConfig("TempSensitivity");
+    }
+
+    internal static void ApplyCpuPowerSetting(string value) {
+      if (value == "max") {
+        cpuPower = "max";
+        SetCpuPowerLimit(254);
+      } else if (value.EndsWith(" W")) {
+        int watt = int.Parse(value.Replace(" W", "").Trim());
+        cpuPower = $"{watt} W";
+        SetCpuPowerLimit((byte)watt);
+      }
+
+      SaveConfig("CpuPower");
+    }
+
+    internal static void ApplyGpuPowerSetting(string value) {
+      gpuPower = value;
+      switch (value) {
+        case "max":
+          SetMaxGpuPower();
+          break;
+        case "med":
+          SetMedGpuPower();
+          break;
+        default:
+          gpuPower = "min";
+          SetMinGpuPower();
+          break;
+      }
+
+      SaveConfig("GpuPower");
+    }
+
+    internal static void ApplyGpuClockSetting(int value) {
+      gpuClock = value;
+      SetGPUClockLimit(gpuClock);
+      SaveConfig("GpuClock");
+    }
+
+    internal static void ApplyFloatingBarSetting(bool enabled) {
+      floatingBar = enabled ? "on" : "off";
+      if (enabled) {
+        ShowFloatingForm();
+      } else {
+        CloseFloatingForm();
+      }
+
+      SaveConfig("FloatingBar");
     }
 
     [DllImport("user32.dll")]
@@ -415,281 +525,16 @@ namespace OmenSuperHub {
           break;
       }
 
+      trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("打开控制台", null, (s, e) => {
+        ShowMainWindow();
+      }, false));
+      trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("显示/隐藏浮窗", null, (s, e) => {
+        ApplyFloatingBarSetting(floatingBar != "on");
+      }, false));
       trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("关于OSH", null, (s, e) => {
         HelpForm.Instance.Show();
       }, false));
-      trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("主窗口", null, (s, e) => {
-        ShowMainWindow();
-      }, false));
-
       trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
-      ToolStripMenuItem fanConfigMenu = new ToolStripMenuItem("风扇配置");
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("安静模式", "fanTableGroup", (s, e) => {
-        fanTable = "silent";
-        LoadFanConfig("silent.txt");
-        SaveConfig("FanTable");
-      }, true));
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("降温模式", "fanTableGroup", (s, e) => {
-        fanTable = "cool";
-        LoadFanConfig("cool.txt");
-        SaveConfig("FanTable");
-      }, false));
-      fanConfigMenu.DropDownItems.Add(new ToolStripSeparator());
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("实时", "tempSensitivityGroup", (s, e) => {
-        tempSensitivity = "realtime";
-        respondSpeed = 1;
-        SaveConfig("TempSensitivity");
-      }, false));
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("高", "tempSensitivityGroup", (s, e) => {
-        tempSensitivity = "high";
-        respondSpeed = 0.4f;
-        SaveConfig("TempSensitivity");
-      }, true));
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("中", "tempSensitivityGroup", (s, e) => {
-        tempSensitivity = "medium";
-        respondSpeed = 0.1f;
-        SaveConfig("TempSensitivity");
-      }, false));
-      fanConfigMenu.DropDownItems.Add(CreateMenuItem("低", "tempSensitivityGroup", (s, e) => {
-        tempSensitivity = "low";
-        respondSpeed = 0.04f;
-        SaveConfig("TempSensitivity");
-      }, false));
-      trayIcon.ContextMenuStrip.Items.Add(fanConfigMenu);
-
-      ToolStripMenuItem fanControlMenu = new ToolStripMenuItem("风扇控制");
-      fanControlMenu.DropDownItems.Add(CreateMenuItem("自动", "fanControlGroup", (s, e) => {
-        fanControl = "auto";
-        SetMaxFanSpeedOff();
-        fanControlTimer.Change(0, 1000);
-        SaveConfig("FanControl");
-      }, true));
-      fanControlMenu.DropDownItems.Add(CreateMenuItem("最大风扇", "fanControlGroup", (s, e) => {
-        fanControl = "max";
-        SetMaxFanSpeedOn();
-        fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        SaveConfig("FanControl");
-      }, false));
-      for (int speed = 1600; speed <= 6400; speed += 400) {
-        int currentSpeed = speed;  // 创建一个局部变量，保存当前的 power 值
-        fanControlMenu.DropDownItems.Add(CreateMenuItem(currentSpeed + " RPM", "fanControlGroup", (s, e) => {
-          fanControl = currentSpeed + " RPM";
-          SetMaxFanSpeedOff();
-          fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
-          SetFanLevel(currentSpeed / 100, currentSpeed / 100);
-          SaveConfig("FanControl");
-        }, false));
-      }
-      trayIcon.ContextMenuStrip.Items.Add(fanControlMenu);
-
-      ToolStripMenuItem performanceControlMenu = new ToolStripMenuItem("性能控制");
-      performanceControlMenu.DropDownItems.Add(CreateMenuItem("狂暴模式", "fanModeGroup", (s, e) => {
-        fanMode = "performance";
-        SetFanMode(0x31);
-        SaveConfig("FanMode");
-        // 恢复CPU功耗设定
-        RestoreCPUPower();
-      }, true));
-      performanceControlMenu.DropDownItems.Add(CreateMenuItem("平衡模式", "fanModeGroup", (s, e) => {
-        fanMode = "default";
-        SetFanMode(0x30);
-        SaveConfig("FanMode");
-        // 恢复CPU功耗设定
-        RestoreCPUPower();
-      }, false));
-      performanceControlMenu.DropDownItems.Add(new ToolStripSeparator()); // Separator between groups
-      performanceControlMenu.DropDownItems.Add(CreateMenuItem("CTGP开+DB开", "gpuPowerGroup", (s, e) => {
-        gpuPower = "max";
-        SetMaxGpuPower();
-        SaveConfig("GpuPower");
-      }, true));
-      performanceControlMenu.DropDownItems.Add(CreateMenuItem("CTGP开+DB关", "gpuPowerGroup", (s, e) => {
-        gpuPower = "med";
-        SetMedGpuPower();
-        SaveConfig("GpuPower");
-      }, false));
-      performanceControlMenu.DropDownItems.Add(CreateMenuItem("CTGP关+DB关", "gpuPowerGroup", (s, e) => {
-        gpuPower = "min";
-        SetMinGpuPower();
-        SaveConfig("GpuPower");
-      }, false));
-      performanceControlMenu.DropDownItems.Add(new ToolStripSeparator()); // Separator between groups
-      ToolStripMenuItem DBMenu = new ToolStripMenuItem("切换DB版本");
-      DBMenu.DropDownItems.Add(CreateMenuItem("解锁版本", "DBGroup", (s, e) => {
-        SetFanMode(0x31);
-        SetMaxGpuPower();
-        SetCpuPowerLimit((byte)CPULimitDB);
-        DBVersion = 1;
-        ChangeDBVersion(DBVersion);
-        countDB = countDBInit;
-        SaveConfig("DBVersion");
-      }, false));
-      DBMenu.DropDownItems.Add(CreateMenuItem("普通版本", "DBGroup", (s, e) => {
-        DBVersion = 2;
-        countDB = 0;
-        //ChangeDBVersion(DBVersion);
-
-        string deviceId = "\"ACPI\\NVDA0820\\NPCF\"";
-        string command = $"pnputil /enable-device {deviceId}";
-        ExecuteCommand(command);
-        SaveConfig("DBVersion");
-      }, true));
-      performanceControlMenu.DropDownItems.Add(DBMenu);
-      ToolStripMenuItem cpuPowerMenu = new ToolStripMenuItem("CPU功率");
-      cpuPowerMenu.DropDownItems.Add(CreateMenuItem("最大", "cpuPowerGroup", (s, e) => {
-        cpuPower = "max";
-        SetCpuPowerLimit(254);
-        SaveConfig("CpuPower");
-      }, true));
-      for (int power = 10; power <= 120; power += 10) {
-        int currentPower = power;  // 创建一个局部变量，保存当前的 power 值
-        cpuPowerMenu.DropDownItems.Add(CreateMenuItem(power + " W", "cpuPowerGroup", (s, e) => {
-          cpuPower = currentPower + " W";
-          SetCpuPowerLimit((byte)currentPower);
-          SaveConfig("CpuPower");
-        }, false));
-      }
-      performanceControlMenu.DropDownItems.Add(cpuPowerMenu);
-      ToolStripMenuItem gpuClockMenu = new ToolStripMenuItem("GPU频率限制");
-      gpuClockMenu.DropDownItems.Add(CreateMenuItem("还原", "gpuClockGroup", (s, e) => {
-        gpuClock = 0;
-        SetGPUClockLimit(gpuClock);
-        SaveConfig("GpuClock");
-      }, true));
-      for (int clock = 600; clock <= 1400; clock += 400) {
-        int currentclock = clock;
-        gpuClockMenu.DropDownItems.Add(CreateMenuItem(currentclock + " MHz", "gpuClockGroup", (s, e) => {
-          gpuClock = currentclock;
-          SetGPUClockLimit(gpuClock);
-          SaveConfig("GpuClock");
-        }, false));
-      }
-      for (int clock = 1550; clock <= 2000; clock += 150) {
-        int currentclock = clock;
-        gpuClockMenu.DropDownItems.Add(CreateMenuItem(currentclock + " MHz", "gpuClockGroup", (s, e) => {
-          gpuClock = currentclock;
-          SetGPUClockLimit(gpuClock);
-          SaveConfig("GpuClock");
-        }, false));
-      }
-      for (int clock = 2100; clock <= 2500; clock += 100) {
-        int currentclock = clock;
-        gpuClockMenu.DropDownItems.Add(CreateMenuItem(currentclock + " MHz", "gpuClockGroup", (s, e) => {
-          gpuClock = currentclock;
-          SetGPUClockLimit(gpuClock);
-          SaveConfig("GpuClock");
-        }, false));
-      }
-      performanceControlMenu.DropDownItems.Add(gpuClockMenu);
-      trayIcon.ContextMenuStrip.Items.Add(performanceControlMenu);
-
-      trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator()); // Separator between groups
-      ToolStripMenuItem hardwareMonitorMenu = new ToolStripMenuItem("硬件监控");
-      ToolStripMenuItem monitorFanMenu = new ToolStripMenuItem("风扇");
-      monitorFanMenu.DropDownItems.Add(CreateMenuItem("开启风扇监控", "monitorFanGroup", (s, e) => {
-        monitorFan = true;
-        SaveConfig("MonitorFan");
-      }, true));
-      monitorFanMenu.DropDownItems.Add(CreateMenuItem("关闭风扇监控", "monitorFanGroup", (s, e) => {
-        monitorFan = false;
-        SaveConfig("MonitorFan");
-      }, false));
-      hardwareMonitorMenu.DropDownItems.Add(monitorFanMenu);
-      trayIcon.ContextMenuStrip.Items.Add(hardwareMonitorMenu);
-      ToolStripMenuItem floatingBarMenu = new ToolStripMenuItem("浮窗显示");
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("关闭浮窗", "floatingBarGroup", (s, e) => {
-        floatingBar = "off";
-        CloseFloatingForm();
-        SaveConfig("FloatingBar");
-      }, true));
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("显示浮窗", "floatingBarGroup", (s, e) => {
-        floatingBar = "on";
-        ShowFloatingForm();
-        SaveConfig("FloatingBar");
-      }, false));
-      floatingBarMenu.DropDownItems.Add(new ToolStripSeparator()); // Separator between groups
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("24号", "floatingBarSizeGroup", (s, e) => {
-        textSize = 24;
-        UpdateFloatingText();
-        SaveConfig("FloatingBarSize");
-      }, false));
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("36号", "floatingBarSizeGroup", (s, e) => {
-        textSize = 36;
-        UpdateFloatingText();
-        SaveConfig("FloatingBarSize");
-      }, false));
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("48号", "floatingBarSizeGroup", (s, e) => {
-        textSize = 48;
-        UpdateFloatingText();
-        SaveConfig("FloatingBarSize");
-      }, true));
-      floatingBarMenu.DropDownItems.Add(new ToolStripSeparator()); // Separator between groups
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("左上角", "floatingBarLocGroup", (s, e) => {
-        floatingBarLoc = "left";
-        UpdateFloatingText();
-        SaveConfig("FloatingBarLoc");
-      }, true));
-      floatingBarMenu.DropDownItems.Add(CreateMenuItem("右上角", "floatingBarLocGroup", (s, e) => {
-        floatingBarLoc = "right";
-        UpdateFloatingText();
-        SaveConfig("FloatingBarLoc");
-      }, false));
-      trayIcon.ContextMenuStrip.Items.Add(floatingBarMenu);
-      ToolStripMenuItem omenKeyMenu = new ToolStripMenuItem("Omen键");
-      omenKeyMenu.DropDownItems.Add(CreateMenuItem("默认", "omenKeyGroup", (s, e) => {
-        omenKey = "default";
-        checkFloatingTimer.Enabled = false;
-        OmenKeyOff();
-        OmenKeyOn(omenKey);
-        SaveConfig("OmenKey");
-      }, true));
-      omenKeyMenu.DropDownItems.Add(CreateMenuItem("切换浮窗显示", "omenKeyGroup", (s, e) => {
-        omenKey = "custom";
-        checkFloatingTimer.Enabled = true;
-        OmenKeyOff();
-        OmenKeyOn(omenKey);
-        SaveConfig("OmenKey");
-      }, false));
-      omenKeyMenu.DropDownItems.Add(CreateMenuItem("取消绑定", "omenKeyGroup", (s, e) => {
-        omenKey = "none";
-        checkFloatingTimer.Enabled = false;
-        OmenKeyOff();
-        SaveConfig("OmenKey");
-      }, false));
-      trayIcon.ContextMenuStrip.Items.Add(omenKeyMenu);
-      ToolStripMenuItem settingMenu = new ToolStripMenuItem("其他设置");
-      ToolStripMenuItem customIconMenu = new ToolStripMenuItem("图标");
-      customIconMenu.DropDownItems.Add(CreateMenuItem("原版", "customIconGroup", (s, e) => {
-        customIcon = "original";
-        trayIcon.Icon = Properties.Resources.smallfan;
-        SaveConfig("CustomIcon");
-      }, true));
-      customIconMenu.DropDownItems.Add(CreateMenuItem("自定义图标", "customIconGroup", (s, e) => {
-        customIcon = "custom";
-        SetCustomIcon();
-        SaveConfig("CustomIcon");
-      }, false));
-      customIconMenu.DropDownItems.Add(CreateMenuItem("动态图标", "customIconGroup", (s, e) => {
-        customIcon = "dynamic";
-        GenerateDynamicIcon((int)CPUTemp);
-        SaveConfig("CustomIcon");
-      }, false));
-      settingMenu.DropDownItems.Add(customIconMenu);
-      ToolStripMenuItem autoStartMenu = new ToolStripMenuItem("开机自启");
-      autoStartMenu.DropDownItems.Add(CreateMenuItem("开启", "autoStartGroup", (s, e) => {
-        autoStart = "on";
-        AutoStartEnable();
-        SaveConfig("AutoStart");
-      }, false));
-      autoStartMenu.DropDownItems.Add(CreateMenuItem("关闭", "autoStartGroup", (s, e) => {
-        autoStart = "off";
-        AutoStartDisable();
-        SaveConfig("AutoStart");
-      }, true));
-      settingMenu.DropDownItems.Add(autoStartMenu);
-      trayIcon.ContextMenuStrip.Items.Add(settingMenu);
-
-      trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator()); // Separator between groups
       trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("退出", null, (s, e) => Exit(), false));
 
       // Initialize tooltip update timer
@@ -1490,9 +1335,11 @@ namespace OmenSuperHub {
         FanMode = fanMode,
         FanControl = fanControl,
         FanTable = fanTable,
+        TempSensitivity = tempSensitivity,
         CpuPowerSetting = cpuPower,
         GpuPowerSetting = gpuPower,
         GpuClockLimit = gpuClock,
+        FloatingBarEnabled = floatingBar == "on",
         GraphicsMode = currentGfxMode,
         GpuStatus = currentGpuStatus == null ? null : new OmenGpuStatus {
           CustomTgpEnabled = currentGpuStatus.CustomTgpEnabled,

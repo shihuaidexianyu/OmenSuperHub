@@ -1,671 +1,835 @@
 using System;
-using System.Drawing;
-using System.Windows.Forms;
+using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using WinForms = System.Windows.Forms;
+using static OmenSuperHub.OmenHardware;
 
 namespace OmenSuperHub {
-  public partial class MainForm : Form {
-    private const int WmEnterSizeMove = 0x0231;
-    private const int WmExitSizeMove = 0x0232;
-
-    private sealed class BufferedTableLayoutPanel : TableLayoutPanel {
-      public BufferedTableLayoutPanel() {
-        DoubleBuffered = true;
-        ResizeRedraw = true;
+  public sealed class MainForm {
+    static MainForm instance;
+    public static MainForm Instance {
+      get {
+        if (instance == null) {
+          instance = new MainForm();
+        }
+        return instance;
       }
     }
 
-    private sealed class BufferedPanel : Panel {
-      public BufferedPanel() {
-        DoubleBuffered = true;
-        ResizeRedraw = true;
+    readonly SolidColorBrush pageBack = new SolidColorBrush(Color.FromRgb(243, 243, 243));
+    readonly SolidColorBrush cardBack = new SolidColorBrush(Color.FromRgb(255, 255, 255));
+    readonly SolidColorBrush borderColor = new SolidColorBrush(Color.FromRgb(220, 223, 228));
+    readonly SolidColorBrush strongText = new SolidColorBrush(Color.FromRgb(31, 33, 36));
+    readonly SolidColorBrush mutedText = new SolidColorBrush(Color.FromRgb(95, 102, 112));
+    readonly SolidColorBrush accentOrange = new SolidColorBrush(Color.FromRgb(218, 125, 0));
+    readonly SolidColorBrush accentBlue = new SolidColorBrush(Color.FromRgb(0, 120, 212));
+    readonly SolidColorBrush accentGreen = new SolidColorBrush(Color.FromRgb(5, 133, 90));
+
+    readonly string[] fanModeItems = { "平衡", "狂暴" };
+    readonly string[] fanControlItems = { "自动", "最大风扇", "1600 RPM", "2000 RPM", "2400 RPM", "2800 RPM", "3200 RPM", "3600 RPM" };
+    readonly string[] fanTableItems = { "安静模式", "降温模式" };
+    readonly string[] tempSensitivityItems = { "高", "中", "低", "实时" };
+    readonly string[] cpuPowerItems = { "最大", "45 W", "55 W", "65 W", "75 W", "90 W" };
+    readonly string[] gpuPowerItems = { "CTGP开+DB开", "CTGP开+DB关", "CTGP关+DB关" };
+    readonly string[] gpuClockItems = { "还原", "1600 MHz", "1800 MHz", "2000 MHz", "2200 MHz", "2400 MHz" };
+
+    Window window;
+    DispatcherTimer refreshTimer;
+    bool syncingControlState;
+
+    TextBlock totalPowerText;
+    TextBlock lastUpdateText;
+
+    TextBlock leftCpuText;
+    TextBlock leftGpuText;
+    TextBlock leftBatteryText;
+    TextBlock leftFanText;
+    TextBlock leftModeText;
+
+    TextBlock gfxModeText;
+    TextBlock adapterText;
+    TextBlock gpuControlText;
+    TextBlock capabilitiesText;
+    TextBlock keyboardText;
+    TextBlock fanTypeText;
+
+    ComboBox fanModeComboBox;
+    ComboBox fanControlComboBox;
+    ComboBox fanTableComboBox;
+    ComboBox tempSensitivityComboBox;
+    ComboBox cpuPowerComboBox;
+    ComboBox gpuPowerComboBox;
+    ComboBox gpuClockComboBox;
+    Button floatingBarButton;
+
+    TextBox telemetryTextBox;
+    TextBox configTextBox;
+
+    MainForm() {
+      EnsureWindow();
+    }
+
+    public WinForms.FormWindowState WindowState {
+      get {
+        EnsureWindow();
+        switch (window.WindowState) {
+          case System.Windows.WindowState.Maximized:
+            return WinForms.FormWindowState.Maximized;
+          case System.Windows.WindowState.Minimized:
+            return WinForms.FormWindowState.Minimized;
+          default:
+            return WinForms.FormWindowState.Normal;
+        }
+      }
+      set {
+        EnsureWindow();
+        switch (value) {
+          case WinForms.FormWindowState.Maximized:
+            window.WindowState = System.Windows.WindowState.Maximized;
+            break;
+          case WinForms.FormWindowState.Minimized:
+            window.WindowState = System.Windows.WindowState.Minimized;
+            break;
+          default:
+            window.WindowState = System.Windows.WindowState.Normal;
+            break;
+        }
       }
     }
 
-    private static MainForm _instance;
+    public void Show() {
+      EnsureWindow();
+      if (!window.IsVisible) {
+        window.Show();
+      }
+      window.Visibility = Visibility.Visible;
+    }
 
-    private readonly System.Windows.Forms.Timer refreshTimer;
-    private bool suppressRefresh;
+    public void BringToFront() {
+      EnsureWindow();
+      window.Topmost = true;
+      window.Topmost = false;
+      window.Focus();
+    }
 
-    private Label titleValueLabel;
-    private Label subtitleValueLabel;
-    private Label cpuTempValueLabel;
-    private Label cpuPowerValueLabel;
-    private Label gpuTempValueLabel;
-    private Label gpuPowerValueLabel;
-    private Label batteryPowerValueLabel;
-    private Label batteryDetailValueLabel;
-    private ProgressBar batteryProgressBar;
-    private Label muxValueLabel;
-    private Label adapterValueLabel;
-    private Label fanValueLabel;
-    private Label policyValueLabel;
-    private Label gpuCtlValueLabel;
-    private Label capabilityValueLabel;
-    private TextBox telemetryTextBox;
-    private TextBox configTextBox;
+    public void Activate() {
+      EnsureWindow();
+      window.Activate();
+    }
 
-    public MainForm() {
-      Text = "OmenSuperHub";
-      StartPosition = FormStartPosition.CenterScreen;
-      MinimumSize = new Size(980, 700);
-      Size = new Size(1120, 780);
-      AutoScaleMode = AutoScaleMode.Dpi;
-      BackColor = Color.FromArgb(243, 239, 231);
-      Icon = Properties.Resources.fan;
-      Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
+    void EnsureWindow() {
+      if (window != null) {
+        return;
+      }
 
-      SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-      UpdateStyles();
+      if (System.Windows.Application.Current == null) {
+        new System.Windows.Application {
+          ShutdownMode = ShutdownMode.OnExplicitShutdown
+        };
+      }
+
+      window = new Window {
+        Title = "OmenSuperHub",
+        Width = 1260,
+        Height = 860,
+        MinWidth = 1080,
+        MinHeight = 760,
+        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        Background = pageBack
+      };
 
       BuildLayout();
 
-      refreshTimer = new System.Windows.Forms.Timer();
-      refreshTimer.Interval = 1500;
-      refreshTimer.Tick += (s, e) => {
-        if (!suppressRefresh && Visible && WindowState != FormWindowState.Minimized) {
-          RefreshDashboard();
+      window.Closing += (s, e) => {
+        e.Cancel = true;
+        window.Hide();
+      };
+      window.IsVisibleChanged += (s, e) => {
+        if (refreshTimer != null) {
+          refreshTimer.IsEnabled = window.IsVisible;
         }
       };
+
+      refreshTimer = new DispatcherTimer {
+        Interval = TimeSpan.FromMilliseconds(1200)
+      };
+      refreshTimer.Tick += (s, e) => RefreshDashboard();
       refreshTimer.Start();
-
-      Shown += (s, e) => RefreshDashboard();
-      VisibleChanged += (s, e) => refreshTimer.Enabled = Visible;
-      Activated += (s, e) => {
-        if (Visible) {
-          RefreshDashboard();
-        }
-      };
-      FormClosing += MainForm_FormClosing;
     }
 
-    private void BuildLayout() {
-      SuspendLayout();
-
-      var root = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        BackColor = BackColor,
-        ColumnCount = 1,
-        RowCount = 3,
-        Padding = new Padding(20)
+    void BuildLayout() {
+      var root = new Grid {
+        Margin = new Thickness(16, 14, 16, 14),
+        Background = pageBack
       };
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 176F));
-      root.RowStyles.Add(new RowStyle(SizeType.Absolute, 300F));
-      root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+      root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(270) });
+      root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-      root.Controls.Add(BuildHeader(), 0, 0);
-      root.Controls.Add(BuildTopSection(), 0, 1);
-      root.Controls.Add(BuildBottomSection(), 0, 2);
+      var leftScroll = new ScrollViewer {
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Margin = new Thickness(0, 0, 12, 0),
+        Background = Brushes.Transparent
+      };
+      var leftStack = new StackPanel();
+      leftScroll.Content = leftStack;
 
-      Controls.Add(root);
-      ResumeLayout(true);
+      leftStack.Children.Add(CreateSidebarBrandCard());
+      leftStack.Children.Add(CreateSidebarSummaryCard());
+      leftStack.Children.Add(CreateSidebarNavCard());
+
+      var rightScroll = new ScrollViewer {
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Background = Brushes.Transparent
+      };
+      var rightStack = new StackPanel();
+      rightScroll.Content = rightStack;
+
+      rightStack.Children.Add(BuildHeaderPanel());
+      rightStack.Children.Add(BuildCoolingPanel());
+      rightStack.Children.Add(BuildPerformancePanel());
+      rightStack.Children.Add(BuildOverlayPanel());
+      rightStack.Children.Add(BuildStatusPanel());
+      rightStack.Children.Add(BuildDetailsPanel());
+
+      Grid.SetColumn(leftScroll, 0);
+      Grid.SetColumn(rightScroll, 1);
+      root.Children.Add(leftScroll);
+      root.Children.Add(rightScroll);
+      window.Content = root;
     }
 
-    private Control BuildHeader() {
-      var panel = new BufferedPanel {
-        Dock = DockStyle.Fill,
-        BackColor = Color.FromArgb(60, 47, 38),
-        Margin = new Padding(0, 0, 0, 14),
-        Padding = new Padding(18, 14, 18, 14)
+    Border CreateCard(double minHeight) {
+      return new Border {
+        Background = cardBack,
+        BorderBrush = borderColor,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = new Thickness(16),
+        Margin = new Thickness(0, 0, 0, 12),
+        MinHeight = minHeight
       };
-
-      var layout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        BackColor = Color.Transparent,
-        ColumnCount = 2,
-        RowCount = 1
-      };
-      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-      var infoLayout = new FlowLayoutPanel {
-        Dock = DockStyle.Fill,
-        FlowDirection = FlowDirection.TopDown,
-        WrapContents = false,
-        AutoScroll = false,
-        AutoSize = false,
-        Margin = new Padding(0),
-        Padding = new Padding(0),
-        BackColor = Color.Transparent
-      };
-
-      var titleLabel = new Label {
-        AutoSize = true,
-        Text = "功率与热状态面板",
-        Font = new Font("Microsoft YaHei UI", 18F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(250, 242, 234),
-        TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Padding(0, 0, 0, 8)
-      };
-
-      var buttonRow = new FlowLayoutPanel {
-        Dock = DockStyle.Top,
-        FlowDirection = FlowDirection.RightToLeft,
-        WrapContents = false,
-        BackColor = Color.Transparent,
-        Margin = new Padding(0),
-        Padding = new Padding(0),
-        AutoSize = true
-      };
-
-      var refreshButton = CreateHeaderButton("立即刷新", Color.FromArgb(212, 117, 43));
-      refreshButton.Click += (s, e) => RefreshDashboard();
-
-      var hideButton = CreateHeaderButton("隐藏到托盘", Color.FromArgb(113, 93, 74));
-      hideButton.Click += (s, e) => Hide();
-
-      buttonRow.Controls.Add(refreshButton);
-      buttonRow.Controls.Add(hideButton);
-
-      titleValueLabel = new Label {
-        AutoSize = true,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(255, 186, 92),
-        TextAlign = ContentAlignment.MiddleLeft,
-        Margin = new Padding(0, 0, 0, 8)
-      };
-
-      subtitleValueLabel = new Label {
-        AutoSize = false,
-        Text = "正在收集硬件状态...",
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(214, 200, 181),
-        TextAlign = ContentAlignment.TopLeft,
-        Margin = new Padding(0),
-        Size = new Size(640, 44)
-      };
-
-      infoLayout.Resize += (s, e) => {
-        subtitleValueLabel.Width = Math.Max(280, infoLayout.ClientSize.Width - 2);
-        subtitleValueLabel.Height = 44;
-      };
-
-      infoLayout.Controls.Add(titleLabel);
-      infoLayout.Controls.Add(titleValueLabel);
-      infoLayout.Controls.Add(subtitleValueLabel);
-
-      layout.Controls.Add(infoLayout, 0, 0);
-      layout.Controls.Add(buttonRow, 1, 0);
-
-      panel.Controls.Add(layout);
-
-      return panel;
     }
 
-    private Button CreateHeaderButton(string text, Color backColor) {
-      var button = new Button {
+    TextBlock CreateSectionTitle(string text) {
+      return new TextBlock {
         Text = text,
-        Size = new Size(108, 34),
-        FlatStyle = FlatStyle.Flat,
-        BackColor = backColor,
-        ForeColor = Color.White,
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold)
+        Foreground = strongText,
+        FontSize = 18,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 0, 0, 10)
       };
-      button.FlatAppearance.BorderSize = 0;
+    }
+
+    TextBlock CreateValueLabel(string text) {
+      return new TextBlock {
+        Text = text,
+        Foreground = strongText,
+        FontSize = 15,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 0, 0, 8),
+        TextWrapping = TextWrapping.Wrap
+      };
+    }
+
+    Border CreateSidebarBrandCard() {
+      var card = CreateCard(96);
+      var stack = new StackPanel();
+      stack.Children.Add(new TextBlock {
+        Text = "OmenSuperHub",
+        Foreground = strongText,
+        FontSize = 26,
+        FontWeight = FontWeights.Bold
+      });
+      stack.Children.Add(new TextBlock {
+        Text = "设备控制与状态",
+        Foreground = mutedText,
+        FontSize = 14
+      });
+      card.Child = stack;
+      return card;
+    }
+
+    Border CreateSidebarSummaryCard() {
+      var card = CreateCard(240);
+      var stack = new StackPanel();
+      stack.Children.Add(CreateSectionTitle("当前状态"));
+
+      leftCpuText = CreateValueLabel("CPU --");
+      leftGpuText = CreateValueLabel("GPU --");
+      leftBatteryText = CreateValueLabel("Battery --");
+      leftFanText = CreateValueLabel("Fan --");
+      leftModeText = CreateValueLabel("Mode --");
+
+      stack.Children.Add(leftCpuText);
+      stack.Children.Add(leftGpuText);
+      stack.Children.Add(leftBatteryText);
+      stack.Children.Add(leftFanText);
+      stack.Children.Add(leftModeText);
+      card.Child = stack;
+      return card;
+    }
+
+    Border CreateSidebarNavCard() {
+      var card = CreateCard(210);
+      var stack = new StackPanel();
+      stack.Children.Add(CreateSectionTitle("设置分类"));
+      stack.Children.Add(CreateNavTag("散热与风扇"));
+      stack.Children.Add(CreateNavTag("功耗与性能"));
+      stack.Children.Add(CreateNavTag("浮窗与显示"));
+      stack.Children.Add(CreateNavTag("硬件状态"));
+      stack.Children.Add(CreateNavTag("实时详情"));
+      card.Child = stack;
+      return card;
+    }
+
+    TextBlock CreateNavTag(string text) {
+      return new TextBlock {
+        Text = text,
+        Foreground = mutedText,
+        FontSize = 14,
+        Margin = new Thickness(0, 0, 0, 8)
+      };
+    }
+
+    Border BuildHeaderPanel() {
+      var card = CreateCard(130);
+
+      var root = new Grid();
+      root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+      var left = new StackPanel();
+      left.Children.Add(new TextBlock {
+        Text = "设置",
+        Foreground = strongText,
+        FontSize = 34,
+        FontWeight = FontWeights.Bold
+      });
+      totalPowerText = new TextBlock {
+        Text = "-- W",
+        Foreground = accentOrange,
+        FontSize = 44,
+        FontWeight = FontWeights.Bold
+      };
+      lastUpdateText = new TextBlock {
+        Text = "最近刷新: --",
+        Foreground = mutedText,
+        FontSize = 14
+      };
+      left.Children.Add(totalPowerText);
+      left.Children.Add(lastUpdateText);
+
+      var actions = new StackPanel {
+        Orientation = Orientation.Horizontal,
+        VerticalAlignment = VerticalAlignment.Top
+      };
+      actions.Children.Add(CreateActionButton("立即刷新", (s, e) => RefreshDashboard()));
+      actions.Children.Add(CreateActionButton("帮助", (s, e) => {
+        HelpForm.Instance.Show();
+        HelpForm.Instance.BringToFront();
+      }));
+      actions.Children.Add(CreateActionButton("隐藏到托盘", (s, e) => window.Hide()));
+
+      Grid.SetColumn(left, 0);
+      Grid.SetColumn(actions, 1);
+      root.Children.Add(left);
+      root.Children.Add(actions);
+
+      card.Child = root;
+      return card;
+    }
+
+    Button CreateActionButton(string text, RoutedEventHandler click) {
+      var button = new Button {
+        Content = text,
+        Margin = new Thickness(0, 0, 10, 0),
+        Padding = new Thickness(14, 8, 14, 8),
+        FontSize = 14,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = strongText,
+        Background = Brushes.White,
+        BorderBrush = borderColor
+      };
+      button.Click += click;
       return button;
     }
 
-    private Control BuildTopSection() {
-      var split = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 2,
-        RowCount = 1,
-        BackColor = Color.Transparent,
-        Margin = new Padding(0, 0, 0, 14)
-      };
-      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 53F));
-      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 47F));
+    Border BuildCoolingPanel() {
+      var card = CreateCard(220);
+      var grid = CreateSettingsGrid();
+      AddTitleToGrid(grid, "散热与风扇");
 
-      split.Controls.Add(BuildMetricGrid(), 0, 0);
-      split.Controls.Add(BuildStatusCard(), 1, 0);
-      return split;
+      fanModeComboBox = CreateComboBox(fanModeItems, FanModeComboBox_SelectionChanged);
+      fanControlComboBox = CreateComboBox(fanControlItems, FanControlComboBox_SelectionChanged);
+      fanTableComboBox = CreateComboBox(fanTableItems, FanTableComboBox_SelectionChanged);
+      tempSensitivityComboBox = CreateComboBox(tempSensitivityItems, TempSensitivityComboBox_SelectionChanged);
+
+      AddControlRow(grid, 1, "模式", fanModeComboBox);
+      AddControlRow(grid, 2, "控制", fanControlComboBox);
+      AddControlRow(grid, 3, "曲线", fanTableComboBox);
+      AddControlRow(grid, 4, "温度响应", tempSensitivityComboBox);
+      card.Child = grid;
+      return card;
     }
 
-    private Control BuildMetricGrid() {
-      var grid = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 2,
-        RowCount = 3,
-        Margin = new Padding(0, 0, 10, 0),
-        BackColor = Color.Transparent
+    Border BuildPerformancePanel() {
+      var card = CreateCard(180);
+      var grid = CreateSettingsGrid();
+      AddTitleToGrid(grid, "功耗与性能");
+
+      cpuPowerComboBox = CreateComboBox(cpuPowerItems, CpuPowerComboBox_SelectionChanged);
+      gpuPowerComboBox = CreateComboBox(gpuPowerItems, GpuPowerComboBox_SelectionChanged);
+      gpuClockComboBox = CreateComboBox(gpuClockItems, GpuClockComboBox_SelectionChanged);
+
+      AddControlRow(grid, 1, "CPU 功率", cpuPowerComboBox);
+      AddControlRow(grid, 2, "GPU 策略", gpuPowerComboBox);
+      AddControlRow(grid, 3, "GPU 锁频", gpuClockComboBox);
+      card.Child = grid;
+      return card;
+    }
+
+    Border BuildOverlayPanel() {
+      var card = CreateCard(110);
+      var grid = CreateSettingsGrid();
+      AddTitleToGrid(grid, "浮窗与显示");
+
+      floatingBarButton = new Button {
+        Content = "浮窗: 关闭",
+        Padding = new Thickness(10, 6, 10, 6),
+        FontSize = 14,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = strongText,
+        Background = new SolidColorBrush(Color.FromRgb(244, 246, 250)),
+        BorderBrush = borderColor,
+        HorizontalAlignment = HorizontalAlignment.Left,
+        MinWidth = 160
+      };
+      floatingBarButton.Click += FloatingBarButton_Click;
+
+      AddControlRow(grid, 1, "浮窗", floatingBarButton);
+      card.Child = grid;
+      return card;
+    }
+
+    Border BuildStatusPanel() {
+      var card = CreateCard(230);
+      var grid = CreateSettingsGrid();
+      AddTitleToGrid(grid, "硬件状态");
+
+      AddValueRow(grid, 1, "显卡模式", out gfxModeText);
+      AddValueRow(grid, 2, "供电/适配器", out adapterText);
+      AddValueRow(grid, 3, "GPU 控制", out gpuControlText);
+      AddValueRow(grid, 4, "能力", out capabilitiesText);
+      AddValueRow(grid, 5, "键盘", out keyboardText);
+      AddValueRow(grid, 6, "风扇类型", out fanTypeText);
+      card.Child = grid;
+      return card;
+    }
+
+    Border BuildDetailsPanel() {
+      var card = CreateCard(320);
+      var root = new Grid();
+      root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+      root.Children.Add(CreateSectionTitle("实时详情"));
+
+      var tabs = new TabControl {
+        Margin = new Thickness(0, 6, 0, 0)
+      };
+      var telemetryTab = new TabItem { Header = "实时遥测" };
+      var configTab = new TabItem { Header = "运行配置" };
+
+      telemetryTextBox = new TextBox {
+        FontFamily = new FontFamily("Consolas"),
+        FontSize = 13,
+        IsReadOnly = true,
+        BorderThickness = new Thickness(0),
+        Background = Brushes.White,
+        Foreground = strongText,
+        AcceptsReturn = true,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        TextWrapping = TextWrapping.NoWrap
+      };
+      configTextBox = new TextBox {
+        FontFamily = new FontFamily("Consolas"),
+        FontSize = 13,
+        IsReadOnly = true,
+        BorderThickness = new Thickness(0),
+        Background = Brushes.White,
+        Foreground = strongText,
+        AcceptsReturn = true,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        TextWrapping = TextWrapping.NoWrap
       };
 
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
-      grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+      telemetryTab.Content = telemetryTextBox;
+      configTab.Content = configTextBox;
+      tabs.Items.Add(telemetryTab);
+      tabs.Items.Add(configTab);
 
-      grid.Controls.Add(CreateMetricCard("CPU 温度", out cpuTempValueLabel, Color.FromArgb(26, 103, 159)), 0, 0);
-      grid.Controls.Add(CreateMetricCard("CPU 功率", out cpuPowerValueLabel, Color.FromArgb(222, 118, 46)), 1, 0);
-      grid.Controls.Add(CreateMetricCard("GPU 温度", out gpuTempValueLabel, Color.FromArgb(35, 123, 86)), 0, 1);
-      grid.Controls.Add(CreateMetricCard("GPU 功率", out gpuPowerValueLabel, Color.FromArgb(119, 76, 152)), 1, 1);
+      Grid.SetRow(tabs, 1);
+      root.Children.Add(tabs);
+      card.Child = root;
+      return card;
+    }
 
-      var batteryCard = CreateBatteryCard();
-      grid.Controls.Add(batteryCard, 0, 2);
-      grid.SetColumnSpan(batteryCard, 2);
-
+    Grid CreateSettingsGrid() {
+      var grid = new Grid();
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
+      grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
       return grid;
     }
 
-    private Control BuildStatusCard() {
-      var card = CreateCard();
-      card.Margin = new Padding(10, 0, 0, 0);
+    void AddTitleToGrid(Grid grid, string title) {
+      grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      var label = CreateSectionTitle(title);
+      Grid.SetRow(label, 0);
+      Grid.SetColumn(label, 0);
+      Grid.SetColumnSpan(label, 2);
+      grid.Children.Add(label);
+    }
 
-      var layout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 2,
-        RowCount = 7,
-        BackColor = Color.White,
-        Padding = new Padding(18, 16, 18, 16)
-      };
-      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
-      layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-      for (int i = 1; i < 7; i++) {
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+    void AddControlRow(Grid grid, int rowIndex, string title, Control control) {
+      while (grid.RowDefinitions.Count <= rowIndex) {
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
       }
 
-      var title = new Label {
-        AutoSize = true,
-        Text = "系统状态摘要",
-        Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(62, 50, 40)
-      };
-      layout.Controls.Add(title, 0, 0);
-      layout.SetColumnSpan(title, 2);
-
-      muxValueLabel = AddStatusRow(layout, 1, "显卡模式");
-      adapterValueLabel = AddStatusRow(layout, 2, "供电/适配器");
-      fanValueLabel = AddStatusRow(layout, 3, "风扇");
-      policyValueLabel = AddStatusRow(layout, 4, "策略");
-      gpuCtlValueLabel = AddStatusRow(layout, 5, "GPU 控制");
-      capabilityValueLabel = AddStatusRow(layout, 6, "能力");
-
-      card.Controls.Add(layout);
-      return card;
-    }
-
-    private Label AddStatusRow(TableLayoutPanel layout, int row, string key) {
-      var keyLabel = new Label {
-        AutoSize = true,
-        Text = key,
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(134, 108, 83),
-        Anchor = AnchorStyles.Left
-      };
-
-      var valueLabel = new Label {
-        Dock = DockStyle.Fill,
-        Text = "--",
-        AutoEllipsis = true,
-        Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(50, 39, 30),
-        TextAlign = ContentAlignment.MiddleLeft
-      };
-
-      layout.Controls.Add(keyLabel, 0, row);
-      layout.Controls.Add(valueLabel, 1, row);
-      return valueLabel;
-    }
-
-    private Control CreateMetricCard(string title, out Label valueLabel, Color accentColor) {
-      var card = CreateCard();
-      card.Margin = new Padding(0, 0, 10, 10);
-
-      var layout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 1,
-        RowCount = 3,
-        BackColor = Color.White,
-        Padding = new Padding(16, 0, 16, 12)
-      };
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-      var accent = new Panel {
-        Dock = DockStyle.Fill,
-        BackColor = accentColor,
-        Margin = new Padding(0)
-      };
-
-      var titleLabel = new Label {
-        Dock = DockStyle.Fill,
+      var label = new TextBlock {
         Text = title,
-        Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(135, 108, 82),
-        TextAlign = ContentAlignment.BottomLeft
+        Foreground = mutedText,
+        FontSize = 14,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(0, 8, 8, 8)
       };
 
-      valueLabel = new Label {
-        Dock = DockStyle.Fill,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(49, 39, 30),
-        TextAlign = ContentAlignment.MiddleLeft,
-        AutoEllipsis = true
-      };
+      if (control is FrameworkElement frameworkElement) {
+        frameworkElement.Margin = new Thickness(0, 4, 0, 8);
+      }
 
-      layout.Controls.Add(accent, 0, 0);
-      layout.Controls.Add(titleLabel, 0, 1);
-      layout.Controls.Add(valueLabel, 0, 2);
-      card.Controls.Add(layout);
-      return card;
+      Grid.SetRow(label, rowIndex);
+      Grid.SetColumn(label, 0);
+      Grid.SetRow(control, rowIndex);
+      Grid.SetColumn(control, 1);
+
+      grid.Children.Add(label);
+      grid.Children.Add(control);
     }
 
-    private Control CreateBatteryCard() {
-      var card = CreateCard();
-      card.Margin = new Padding(0);
+    void AddValueRow(Grid grid, int rowIndex, string title, out TextBlock valueText) {
+      while (grid.RowDefinitions.Count <= rowIndex) {
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+      }
 
-      var layout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 1,
-        RowCount = 5,
-        BackColor = Color.White,
-        Padding = new Padding(16, 0, 16, 14)
-      };
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 5F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-
-      var accent = new Panel {
-        Dock = DockStyle.Fill,
-        BackColor = Color.FromArgb(183, 127, 46),
-        Margin = new Padding(0)
-      };
-
-      var titleLabel = new Label {
-        Dock = DockStyle.Fill,
-        Text = "电池功率与容量",
-        Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(135, 108, 82),
-        TextAlign = ContentAlignment.BottomLeft
-      };
-
-      batteryPowerValueLabel = new Label {
-        Dock = DockStyle.Fill,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(49, 39, 30),
-        TextAlign = ContentAlignment.MiddleLeft,
-        AutoEllipsis = true
-      };
-
-      batteryDetailValueLabel = new Label {
-        Dock = DockStyle.Fill,
-        Text = "--",
-        Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
-        ForeColor = Color.FromArgb(112, 90, 68),
-        TextAlign = ContentAlignment.MiddleLeft,
-        AutoEllipsis = true
-      };
-
-      batteryProgressBar = new ProgressBar {
-        Dock = DockStyle.Fill,
-        Maximum = 100,
-        Style = ProgressBarStyle.Continuous,
-        Margin = new Padding(0, 2, 0, 0)
-      };
-
-      layout.Controls.Add(accent, 0, 0);
-      layout.Controls.Add(titleLabel, 0, 1);
-      layout.Controls.Add(batteryPowerValueLabel, 0, 2);
-      layout.Controls.Add(batteryDetailValueLabel, 0, 3);
-      layout.Controls.Add(batteryProgressBar, 0, 4);
-      card.Controls.Add(layout);
-      return card;
-    }
-
-    private Control BuildBottomSection() {
-      var split = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 2,
-        RowCount = 1,
-        BackColor = Color.Transparent
-      };
-      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-      split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-
-      telemetryTextBox = CreateDetailsBox();
-      configTextBox = CreateDetailsBox();
-
-      var telemetryCard = CreateDetailsCard("实时遥测", telemetryTextBox);
-      telemetryCard.Margin = new Padding(0, 0, 10, 0);
-      var configCard = CreateDetailsCard("运行配置", configTextBox);
-      configCard.Margin = new Padding(10, 0, 0, 0);
-
-      split.Controls.Add(telemetryCard, 0, 0);
-      split.Controls.Add(configCard, 1, 0);
-      return split;
-    }
-
-    private Control CreateDetailsCard(string title, TextBox textBox) {
-      var card = CreateCard();
-
-      var layout = new BufferedTableLayoutPanel {
-        Dock = DockStyle.Fill,
-        ColumnCount = 1,
-        RowCount = 2,
-        BackColor = Color.White,
-        Padding = new Padding(16)
-      };
-      layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-      layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-      var titleLabel = new Label {
-        Dock = DockStyle.Fill,
+      var label = new TextBlock {
         Text = title,
-        Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold),
-        ForeColor = Color.FromArgb(62, 50, 40),
-        TextAlign = ContentAlignment.MiddleLeft
+        Foreground = mutedText,
+        FontSize = 14,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(0, 8, 8, 8)
+      };
+      valueText = new TextBlock {
+        Text = "--",
+        Foreground = strongText,
+        FontSize = 15,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 8, 0, 8),
+        TextWrapping = TextWrapping.Wrap
       };
 
-      textBox.Dock = DockStyle.Fill;
-
-      layout.Controls.Add(titleLabel, 0, 0);
-      layout.Controls.Add(textBox, 0, 1);
-      card.Controls.Add(layout);
-      return card;
+      Grid.SetRow(label, rowIndex);
+      Grid.SetColumn(label, 0);
+      Grid.SetRow(valueText, rowIndex);
+      Grid.SetColumn(valueText, 1);
+      grid.Children.Add(label);
+      grid.Children.Add(valueText);
     }
 
-    private static BufferedPanel CreateCard() {
-      return new BufferedPanel {
-        Dock = DockStyle.Fill,
-        BackColor = Color.White
+    ComboBox CreateComboBox(IEnumerable<string> items, SelectionChangedEventHandler handler) {
+      var comboBox = new ComboBox {
+        MinWidth = 220,
+        FontSize = 14
       };
+      foreach (var item in items) {
+        comboBox.Items.Add(item);
+      }
+      comboBox.SelectionChanged += handler;
+      return comboBox;
     }
 
-    private static TextBox CreateDetailsBox() {
-      return new TextBox {
-        Multiline = true,
-        ReadOnly = true,
-        ScrollBars = ScrollBars.Vertical,
-        BorderStyle = BorderStyle.None,
-        BackColor = Color.FromArgb(250, 247, 242),
-        ForeColor = Color.FromArgb(55, 44, 34),
-        Font = new Font("Consolas", 10F),
-        WordWrap = false
-      };
-    }
+    void RefreshDashboard() {
+      if (window == null || !window.IsVisible) {
+        return;
+      }
 
-    private void RefreshDashboard() {
       var snapshot = Program.GetDashboardSnapshot();
-      float? batteryPower = GetBatteryPower(snapshot.Battery);
-      float totalPower = snapshot.CpuPowerWatts + (snapshot.MonitorGpu ? snapshot.GpuPowerWatts : 0F);
 
-      SetTextIfChanged(titleValueLabel, $"{totalPower:F1} W");
-      SetTextIfChanged(subtitleValueLabel, $"{(snapshot.AcOnline ? "交流电" : "电池")} | CPU {snapshot.CpuPowerWatts:F1}W | GPU {(snapshot.MonitorGpu ? snapshot.GpuPowerWatts.ToString("F1") : "--")}W");
+      totalPowerText.Text = $"{snapshot.CpuPowerWatts + snapshot.GpuPowerWatts:F1} W";
+      lastUpdateText.Text = $"最近刷新: {DateTime.Now:HH:mm:ss}";
 
-      SetTextIfChanged(cpuTempValueLabel, $"{snapshot.CpuTemperature:F1} °C");
-      SetTextIfChanged(cpuPowerValueLabel, $"{snapshot.CpuPowerWatts:F1} W");
-      SetTextIfChanged(gpuTempValueLabel, snapshot.MonitorGpu ? $"{snapshot.GpuTemperature:F1} °C" : "监控关闭");
-      SetTextIfChanged(gpuPowerValueLabel, snapshot.MonitorGpu ? $"{snapshot.GpuPowerWatts:F1} W" : "--");
-      SetTextIfChanged(batteryPowerValueLabel, batteryPower.HasValue ? $"{batteryPower.Value:F1} W" : "无功率读数");
-      SetTextIfChanged(batteryDetailValueLabel, BuildBatteryDetail(snapshot, batteryPower));
+      leftCpuText.Text = $"CPU {snapshot.CpuTemperature:F1}°C / {snapshot.CpuPowerWatts:F1}W";
+      leftGpuText.Text = snapshot.MonitorGpu ? $"GPU {snapshot.GpuTemperature:F1}°C / {snapshot.GpuPowerWatts:F1}W" : "GPU disabled";
+      leftBatteryText.Text = BuildBatterySummary(snapshot);
+      leftFanText.Text = $"Fan {FormatFanRpm(snapshot.FanSpeeds)}";
+      leftModeText.Text = $"Mode {(snapshot.FanMode == "performance" ? "狂暴" : "平衡")} / {ConvertFanControlValue(snapshot.FanControl)}";
 
-      int batteryPercent = Math.Max(0, Math.Min(100, snapshot.BatteryPercent));
-      if (batteryProgressBar.Value != batteryPercent)
-        batteryProgressBar.Value = batteryPercent;
+      gfxModeText.Text = FormatGfxMode(snapshot.GraphicsMode);
+      adapterText.Text = $"{FormatAdapterStatus(snapshot.SmartAdapterStatus)} / {(snapshot.AcOnline ? "AC" : "Battery")}";
+      gpuControlText.Text = FormatGpuControl(snapshot.GpuStatus);
+      capabilitiesText.Text = BuildCapabilitiesSummary(snapshot);
+      keyboardText.Text = FormatKeyboardType(snapshot.KeyboardType);
+      fanTypeText.Text = snapshot.FanTypeInfo == null ? "Unknown" : $"{snapshot.FanTypeInfo.Fan1Type}/{snapshot.FanTypeInfo.Fan2Type}";
 
-      SetTextIfChanged(muxValueLabel, FormatGraphicsMode(snapshot.GraphicsMode));
-      SetTextIfChanged(adapterValueLabel, $"{FormatAdapterStatus(snapshot.SmartAdapterStatus)} / {(snapshot.AcOnline ? "AC" : "Battery")}");
-      SetTextIfChanged(fanValueLabel, snapshot.MonitorFan ? $"{snapshot.FanSpeeds[0] * 100}/{snapshot.FanSpeeds[1] * 100} RPM" : "监控关闭");
-      SetTextIfChanged(policyValueLabel, $"{snapshot.FanMode} | CPU {snapshot.CpuPowerSetting} | GPU {snapshot.GpuPowerSetting}");
-      SetTextIfChanged(gpuCtlValueLabel, FormatGpuControl(snapshot.GpuStatus));
-      SetTextIfChanged(capabilityValueLabel, BuildCapabilitySummary(snapshot));
+      telemetryTextBox.Text = BuildTelemetryText(snapshot);
+      configTextBox.Text = BuildConfigText(snapshot);
 
-      SetTextIfChanged(telemetryTextBox, BuildTelemetryText(snapshot, batteryPower));
-      SetTextIfChanged(configTextBox, BuildConfigText(snapshot));
+      SyncControlState(snapshot);
     }
 
-    private static void SetTextIfChanged(Control control, string text) {
-      if (control.Text != text)
-        control.Text = text;
+    void SyncControlState(Program.DashboardSnapshot snapshot) {
+      syncingControlState = true;
+      try {
+        SelectComboItem(fanModeComboBox, snapshot.FanMode == "performance" ? "狂暴" : "平衡");
+        SelectComboItem(fanControlComboBox, ConvertFanControlValue(snapshot.FanControl));
+        SelectComboItem(fanTableComboBox, snapshot.FanTable == "cool" ? "降温模式" : "安静模式");
+        SelectComboItem(tempSensitivityComboBox, ConvertTempSensitivity(snapshot.TempSensitivity));
+        SelectComboItem(cpuPowerComboBox, snapshot.CpuPowerSetting == "max" ? "最大" : snapshot.CpuPowerSetting);
+        SelectComboItem(gpuPowerComboBox, ConvertGpuPowerValue(snapshot.GpuPowerSetting));
+        SelectComboItem(gpuClockComboBox, snapshot.GpuClockLimit > 0 ? $"{snapshot.GpuClockLimit} MHz" : "还原");
+
+        bool overlayEnabled = snapshot.FloatingBarEnabled;
+        floatingBarButton.Content = overlayEnabled ? "浮窗: 开启" : "浮窗: 关闭";
+        floatingBarButton.Background = overlayEnabled
+          ? new SolidColorBrush(Color.FromRgb(229, 247, 240))
+          : new SolidColorBrush(Color.FromRgb(244, 246, 250));
+        floatingBarButton.Foreground = overlayEnabled ? accentGreen : strongText;
+      } finally {
+        syncingControlState = false;
+      }
     }
 
-    private static float? GetBatteryPower(Program.BatteryTelemetry battery) {
-      if (battery == null)
-        return null;
+    void SelectComboItem(ComboBox comboBox, string value) {
+      if (comboBox == null) return;
+      if (comboBox.Items.Contains(value)) {
+        comboBox.SelectedItem = value;
+      } else if (comboBox.SelectedIndex < 0 && comboBox.Items.Count > 0) {
+        comboBox.SelectedIndex = 0;
+      }
+    }
 
-      if (battery.Discharging && battery.DischargeRateMilliwatts > 0)
-        return battery.DischargeRateMilliwatts / 1000f;
+    void FanModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || fanModeComboBox.SelectedItem == null) return;
+      Program.ApplyFanModeSetting(fanModeComboBox.SelectedItem.ToString() == "狂暴" ? "performance" : "default");
+      RefreshDashboard();
+    }
 
-      if (battery.Charging && battery.ChargeRateMilliwatts > 0)
-        return battery.ChargeRateMilliwatts / 1000f;
+    void FanControlComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || fanControlComboBox.SelectedItem == null) return;
+      string selected = fanControlComboBox.SelectedItem.ToString();
+      Program.ApplyFanControlSetting(selected == "自动" ? "auto" : selected == "最大风扇" ? "max" : selected);
+      RefreshDashboard();
+    }
 
+    void FanTableComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || fanTableComboBox.SelectedItem == null) return;
+      Program.ApplyFanTableSetting(fanTableComboBox.SelectedItem.ToString() == "降温模式" ? "cool" : "silent");
+      RefreshDashboard();
+    }
+
+    void TempSensitivityComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || tempSensitivityComboBox.SelectedItem == null) return;
+      Program.ApplyTempSensitivitySetting(ConvertTempSensitivityBack(tempSensitivityComboBox.SelectedItem.ToString()));
+      RefreshDashboard();
+    }
+
+    void CpuPowerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || cpuPowerComboBox.SelectedItem == null) return;
+      string selected = cpuPowerComboBox.SelectedItem.ToString();
+      Program.ApplyCpuPowerSetting(selected == "最大" ? "max" : selected);
+      RefreshDashboard();
+    }
+
+    void GpuPowerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || gpuPowerComboBox.SelectedItem == null) return;
+      Program.ApplyGpuPowerSetting(ConvertGpuPowerValueBack(gpuPowerComboBox.SelectedItem.ToString()));
+      RefreshDashboard();
+    }
+
+    void GpuClockComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || gpuClockComboBox.SelectedItem == null) return;
+      string selected = gpuClockComboBox.SelectedItem.ToString();
+      Program.ApplyGpuClockSetting(selected == "还原" ? 0 : int.Parse(selected.Replace(" MHz", string.Empty)));
+      RefreshDashboard();
+    }
+
+    void FloatingBarButton_Click(object sender, RoutedEventArgs e) {
+      if (syncingControlState) return;
+      var snapshot = Program.GetDashboardSnapshot();
+      Program.ApplyFloatingBarSetting(!snapshot.FloatingBarEnabled);
+      RefreshDashboard();
+    }
+
+    string BuildBatterySummary(Program.DashboardSnapshot snapshot) {
+      if (snapshot.Battery == null) return "Battery --";
+      float? power = GetBatteryPowerWatts(snapshot.Battery);
+      if (power.HasValue) return $"{BuildBatteryState(snapshot.Battery)} {power.Value:F1}W";
+      return $"{BuildBatteryState(snapshot.Battery)} {snapshot.BatteryPercent}%";
+    }
+
+    string BuildTelemetryText(Program.DashboardSnapshot snapshot) {
+      float? batteryPower = GetBatteryPowerWatts(snapshot.Battery);
+      var lines = new List<string> {
+        $"CPU Temp       : {snapshot.CpuTemperature:F1} °C",
+        $"CPU Power      : {snapshot.CpuPowerWatts:F1} W",
+        $"GPU Temp       : {(snapshot.MonitorGpu ? $"{snapshot.GpuTemperature:F1} °C" : "disabled")}",
+        $"GPU Power      : {(snapshot.MonitorGpu ? $"{snapshot.GpuPowerWatts:F1} W" : "--")}",
+        $"Battery Power  : {(batteryPower.HasValue ? $"{batteryPower.Value:F1} W" : "--")}",
+        $"Battery State  : {BuildBatteryState(snapshot.Battery)}",
+        $"Capacity       : {(snapshot.Battery != null ? $"{snapshot.Battery.RemainingCapacityMilliwattHours / 1000f:F1} Wh" : "--")}",
+        $"Voltage        : {(snapshot.Battery != null ? $"{snapshot.Battery.VoltageMillivolts / 1000f:F2} V" : "--")}",
+        $"Battery %      : {snapshot.BatteryPercent}%",
+        $"Fan RPM        : {FormatFanRpm(snapshot.FanSpeeds)}",
+        $"MUX            : {FormatGfxMode(snapshot.GraphicsMode)}",
+        $"Adapter        : {FormatAdapterStatus(snapshot.SmartAdapterStatus)}"
+      };
+      return string.Join(Environment.NewLine, lines);
+    }
+
+    string BuildConfigText(Program.DashboardSnapshot snapshot) {
+      var lines = new List<string> {
+        $"Mode           : {(snapshot.FanMode == "performance" ? "狂暴" : "平衡")}",
+        $"Fan Control    : {ConvertFanControlValue(snapshot.FanControl)}",
+        $"Fan Curve      : {(snapshot.FanTable == "cool" ? "降温模式" : "安静模式")}",
+        $"Sensitivity    : {ConvertTempSensitivity(snapshot.TempSensitivity)}",
+        $"CPU Limit      : {(snapshot.CpuPowerSetting == "max" ? "最大" : snapshot.CpuPowerSetting)}",
+        $"GPU Policy     : {ConvertGpuPowerValue(snapshot.GpuPowerSetting)}",
+        $"GPU Clock      : {(snapshot.GpuClockLimit > 0 ? $"{snapshot.GpuClockLimit} MHz" : "还原")}",
+        $"Floating Bar   : {(snapshot.FloatingBarEnabled ? "开启" : "关闭")}",
+        $"GPU Control    : {FormatGpuControl(snapshot.GpuStatus)}",
+        $"Adapter        : {FormatAdapterStatus(snapshot.SmartAdapterStatus)}",
+        $"Capabilities   : {BuildCapabilitiesSummary(snapshot)}",
+        $"Keyboard       : {FormatKeyboardType(snapshot.KeyboardType)}"
+      };
+      return string.Join(Environment.NewLine, lines);
+    }
+
+    string BuildCapabilitiesSummary(Program.DashboardSnapshot snapshot) {
+      var parts = new List<string>();
+      if (snapshot.SystemDesignData != null) {
+        if (snapshot.SystemDesignData.GraphicsSwitcherSupported) parts.Add("GfxSwitch");
+        if (snapshot.SystemDesignData.SoftwareFanControlSupported) parts.Add("SW Fan");
+        if (snapshot.SystemDesignData.DefaultPl4 > 0) parts.Add($"PL4 {snapshot.SystemDesignData.DefaultPl4}W");
+      }
+      if (snapshot.FanTypeInfo != null) {
+        parts.Add($"Fan {snapshot.FanTypeInfo.Fan1Type}/{snapshot.FanTypeInfo.Fan2Type}");
+      }
+      return parts.Count == 0 ? "Unknown" : string.Join(" | ", parts);
+    }
+
+    string ConvertFanControlValue(string value) {
+      if (value == "auto") return "自动";
+      if (value == "max") return "最大风扇";
+      return value;
+    }
+
+    string ConvertGpuPowerValue(string value) {
+      if (value == "max") return "CTGP开+DB开";
+      if (value == "med") return "CTGP开+DB关";
+      return "CTGP关+DB关";
+    }
+
+    string ConvertGpuPowerValueBack(string value) {
+      if (value == "CTGP开+DB开") return "max";
+      if (value == "CTGP开+DB关") return "med";
+      return "min";
+    }
+
+    string ConvertTempSensitivity(string value) {
+      if (value == "realtime") return "实时";
+      if (value == "medium") return "中";
+      if (value == "low") return "低";
+      return "高";
+    }
+
+    string ConvertTempSensitivityBack(string value) {
+      if (value == "实时") return "realtime";
+      if (value == "中") return "medium";
+      if (value == "低") return "low";
+      return "high";
+    }
+
+    string BuildBatteryState(Program.BatteryTelemetry telemetry) {
+      if (telemetry == null) return "Unknown";
+      if (telemetry.Discharging) return "Discharging";
+      if (telemetry.Charging) return "Charging";
+      return telemetry.PowerOnline ? "AC Idle" : "Battery Idle";
+    }
+
+    float? GetBatteryPowerWatts(Program.BatteryTelemetry telemetry) {
+      if (telemetry == null) return null;
+      if (telemetry.Discharging && telemetry.DischargeRateMilliwatts > 0) return telemetry.DischargeRateMilliwatts / 1000f;
+      if (telemetry.Charging && telemetry.ChargeRateMilliwatts > 0) return telemetry.ChargeRateMilliwatts / 1000f;
       return null;
     }
 
-    private static string BuildBatteryDetail(Program.DashboardSnapshot snapshot, float? batteryPower) {
-      if (snapshot.Battery == null)
-        return "BatteryStatus 不可用";
-
-      string mode = snapshot.Battery.Discharging ? "放电" : (snapshot.Battery.Charging ? "充电" : (snapshot.AcOnline ? "交流电待机" : "电池待机"));
-      string power = batteryPower.HasValue ? $"{batteryPower.Value:F1}W" : "--";
-      string capacity = snapshot.Battery.RemainingCapacityMilliwattHours > 0 ? $"{snapshot.Battery.RemainingCapacityMilliwattHours / 1000f:F1}Wh" : "--";
-      return $"{mode} | {power} | {capacity} | {snapshot.BatteryPercent}%";
+    string FormatFanRpm(List<int> fanSpeeds) {
+      if (fanSpeeds == null || fanSpeeds.Count < 2) return "--";
+      return $"{fanSpeeds[0]} / {fanSpeeds[1]}";
     }
 
-    private static string BuildTelemetryText(Program.DashboardSnapshot snapshot, float? batteryPower) {
-      return string.Join(Environment.NewLine, new[] {
-        $"CPU Temp      : {snapshot.CpuTemperature:F1} °C",
-        $"CPU Power     : {snapshot.CpuPowerWatts:F1} W",
-        $"GPU Temp      : {(snapshot.MonitorGpu ? snapshot.GpuTemperature.ToString("F1") + " °C" : "disabled")}",
-        $"GPU Power     : {(snapshot.MonitorGpu ? snapshot.GpuPowerWatts.ToString("F1") + " W" : "--")}",
-        $"Battery Power : {(batteryPower.HasValue ? batteryPower.Value.ToString("F1") + " W" : "--")}",
-        $"Battery Mode  : {BuildBatteryMode(snapshot)}",
-        $"Voltage       : {(snapshot.Battery == null ? "--" : (snapshot.Battery.VoltageMillivolts / 1000f).ToString("F2") + " V")}",
-        $"Capacity      : {(snapshot.Battery == null ? "--" : (snapshot.Battery.RemainingCapacityMilliwattHours / 1000f).ToString("F1") + " Wh")}",
-        $"Battery %     : {snapshot.BatteryPercent}%",
-        $"Fan RPM       : {(snapshot.MonitorFan ? snapshot.FanSpeeds[0] * 100 + " / " + snapshot.FanSpeeds[1] * 100 : "disabled")}"
-      });
-    }
-
-    private static string BuildConfigText(Program.DashboardSnapshot snapshot) {
-      return string.Join(Environment.NewLine, new[] {
-        $"Graphics Mode : {FormatGraphicsMode(snapshot.GraphicsMode)}",
-        $"GPU Control   : {FormatGpuControl(snapshot.GpuStatus)}",
-        $"Fan Control   : {snapshot.FanControl}",
-        $"Fan Curve     : {snapshot.FanTable}",
-        $"Perf Mode     : {snapshot.FanMode}",
-        $"CPU Limit     : {snapshot.CpuPowerSetting}",
-        $"GPU Policy    : {snapshot.GpuPowerSetting}",
-        $"GPU Clock     : {(snapshot.GpuClockLimit > 0 ? snapshot.GpuClockLimit + " MHz" : "restore")}",
-        $"Adapter       : {FormatAdapterStatus(snapshot.SmartAdapterStatus)}",
-        $"Capabilities  : {BuildCapabilitySummary(snapshot)}",
-        $"Keyboard      : {(byte)snapshot.KeyboardType:X2}",
-        $"Fan Type      : {(snapshot.FanTypeInfo == null ? "--" : snapshot.FanTypeInfo.Fan1Type + "/" + snapshot.FanTypeInfo.Fan2Type)}"
-      });
-    }
-
-    private static string BuildBatteryMode(Program.DashboardSnapshot snapshot) {
-      if (snapshot.Battery == null)
-        return "Unavailable";
-
-      if (snapshot.Battery.Discharging)
-        return "Discharging";
-      if (snapshot.Battery.Charging)
-        return "Charging";
-      return snapshot.AcOnline ? "AC Idle" : "Battery Idle";
-    }
-
-    private static string FormatGraphicsMode(OmenHardware.OmenGfxMode mode) {
+    string FormatGfxMode(OmenGfxMode mode) {
       switch (mode) {
-        case OmenHardware.OmenGfxMode.Hybrid:
+        case OmenGfxMode.Hybrid:
           return "Hybrid";
-        case OmenHardware.OmenGfxMode.Discrete:
+        case OmenGfxMode.Discrete:
           return "Discrete";
-        case OmenHardware.OmenGfxMode.Optimus:
+        case OmenGfxMode.Optimus:
           return "Optimus";
         default:
           return "Unknown";
       }
     }
 
-    private static string FormatAdapterStatus(OmenHardware.OmenSmartAdapterStatus status) {
+    string FormatGpuControl(OmenGpuStatus status) {
+      if (status == null) return "Unknown";
+      string mode = status.CustomTgpEnabled ? (status.PpabEnabled ? "cTGP+PPAB" : "cTGP") : "BaseTGP";
+      return $"{mode} | D{status.DState}";
+    }
+
+    string FormatAdapterStatus(OmenSmartAdapterStatus status) {
       switch (status) {
-        case OmenHardware.OmenSmartAdapterStatus.MeetsRequirement:
+        case OmenSmartAdapterStatus.MeetsRequirement:
           return "OK";
-        case OmenHardware.OmenSmartAdapterStatus.BatteryPower:
+        case OmenSmartAdapterStatus.BatteryPower:
           return "Battery";
-        case OmenHardware.OmenSmartAdapterStatus.BelowRequirement:
+        case OmenSmartAdapterStatus.BelowRequirement:
           return "Low";
-        case OmenHardware.OmenSmartAdapterStatus.NotFunctioning:
+        case OmenSmartAdapterStatus.NotFunctioning:
           return "Fault";
-        case OmenHardware.OmenSmartAdapterStatus.NoSupport:
+        case OmenSmartAdapterStatus.NoSupport:
           return "N/A";
         default:
+          return "?";
+      }
+    }
+
+    string FormatKeyboardType(OmenKeyboardType type) {
+      switch (type) {
+        case OmenKeyboardType.Standard:
+          return "Standard";
+        case OmenKeyboardType.WithNumpad:
+          return "With Numpad";
+        case OmenKeyboardType.Tenkeyless:
+          return "Tenkeyless";
+        case OmenKeyboardType.PerKeyRgb:
+          return "Per-Key RGB";
+        default:
           return "Unknown";
-      }
-    }
-
-    private static string FormatGpuControl(OmenHardware.OmenGpuStatus status) {
-      if (status == null)
-        return "Unknown";
-
-      string powerMode = status.CustomTgpEnabled ? "cTGP" : "BaseTGP";
-      if (status.PpabEnabled)
-        powerMode += " + PPAB";
-      return $"{powerMode} | D{status.DState}";
-    }
-
-    private static string BuildCapabilitySummary(Program.DashboardSnapshot snapshot) {
-      if (snapshot.SystemDesignData == null)
-        return "Unknown";
-
-      string gfxSwitch = snapshot.SystemDesignData.GraphicsSwitcherSupported ? "GfxSwitch" : "No GfxSwitch";
-      string fan = snapshot.SystemDesignData.SoftwareFanControlSupported ? "SW Fan" : "BIOS Fan";
-      return $"{gfxSwitch} | {fan} | PL4 {snapshot.SystemDesignData.DefaultPl4}W";
-    }
-
-    protected override void WndProc(ref Message m) {
-      if (m.Msg == WmEnterSizeMove) {
-        suppressRefresh = true;
-      } else if (m.Msg == WmExitSizeMove) {
-        suppressRefresh = false;
-        RefreshDashboard();
-      }
-
-      base.WndProc(ref m);
-    }
-
-    private void MainForm_FormClosing(object sender, FormClosingEventArgs e) {
-      if (e.CloseReason == CloseReason.UserClosing) {
-        e.Cancel = true;
-        Hide();
-      }
-    }
-
-    public static MainForm Instance {
-      get {
-        if (_instance == null || _instance.IsDisposed) {
-          _instance = new MainForm();
-        }
-        return _instance;
       }
     }
   }
