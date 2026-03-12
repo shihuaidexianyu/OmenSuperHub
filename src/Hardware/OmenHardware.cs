@@ -169,7 +169,9 @@ namespace OmenSuperHub {
     }
 
     public static void SetFanLevel(int fanSpeed1, int fanSpeed2) {
-      SendOmenBiosWmi(0x2E, new byte[] { (byte)fanSpeed1, (byte)fanSpeed2 }, 0);
+      int safeFanSpeed1 = Math.Max(0, Math.Min(64, fanSpeed1));
+      int safeFanSpeed2 = Math.Max(0, Math.Min(64, fanSpeed2));
+      SendOmenBiosWmi(0x2E, new byte[] { (byte)safeFanSpeed1, (byte)safeFanSpeed2 }, 0);
       //Console.WriteLine("SetFanLevel: " + fanSpeed * 100);
     }
 

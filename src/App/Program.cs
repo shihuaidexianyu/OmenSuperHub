@@ -52,11 +52,9 @@ namespace OmenSuperHub {
         SetMaxFanSpeedOn();
         fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
       } else if (controlValue.EndsWith(" RPM")) {
-        fanControl = controlValue;
         SetMaxFanSpeedOff();
         fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        int rpmValue = int.Parse(controlValue.Replace(" RPM", "").Trim());
-        SetFanLevel(rpmValue / 100, rpmValue / 100);
+        ApplyManualFanRpm(controlValue);
       }
 
       SaveConfig("FanControl");
@@ -173,6 +171,10 @@ namespace OmenSuperHub {
     static int textSize = 48;
     static int countRestore = 0, gpuClock = 0;
     static int alreadyRead = 0, alreadyReadCode = 1000;
+    const int FanMinRpm = 0;
+    const int FanMaxRpm = 6400;
+    const int FanRawStep = 100;
+    const int FanMaxRawLevel = FanMaxRpm / FanRawStep;
     static string fanTable = "silent", fanMode = "performance", fanControl = "auto", tempSensitivity = "high", cpuPower = "max", gpuPower = "max", autoStart = "off", customIcon = "original", floatingBar = "off", floatingBarLoc = "left", omenKey = "default";
     static bool smartPowerControlEnabled = true;
     static string smartPowerControlState = "balanced";
@@ -206,6 +208,40 @@ namespace OmenSuperHub {
     static int advancedStatusRefreshInProgress = 0;
     static volatile bool checkFloating = false;
     static volatile bool isShuttingDown = false;
+
+    static int ClampFanRpm(int rpm) {
+      return Math.Max(FanMinRpm, Math.Min(FanMaxRpm, rpm));
+    }
+
+    static int FanRpmToRawLevel(int rpm) {
+      int clampedRpm = ClampFanRpm(rpm);
+      return Math.Max(0, Math.Min(FanMaxRawLevel, clampedRpm / FanRawStep));
+    }
+
+    static bool TryParseFanRpm(string value, out int rpm) {
+      rpm = FanMinRpm;
+      if (string.IsNullOrWhiteSpace(value)) {
+        return false;
+      }
+
+      string normalized = value.Replace(" RPM", string.Empty).Trim();
+      if (!int.TryParse(normalized, out int parsed)) {
+        return false;
+      }
+
+      rpm = ClampFanRpm(parsed);
+      return true;
+    }
+
+    static void ApplyManualFanRpm(string value) {
+      if (!TryParseFanRpm(value, out int rpm)) {
+        return;
+      }
+
+      fanControl = $"{rpm} RPM";
+      int rawLevel = FanRpmToRawLevel(rpm);
+      SetFanLevel(rawLevel, rawLevel);
+    }
 
     [STAThread]
     static void Main(string[] args) {
@@ -263,8 +299,8 @@ namespace OmenSuperHub {
             return;
           }
 
-          int fanSpeed1 = GetFanSpeedForTemperature(0) / 100;
-          int fanSpeed2 = GetFanSpeedForTemperature(1) / 100;
+          int fanSpeed1 = FanRpmToRawLevel(GetFanSpeedForTemperature(0));
+          int fanSpeed2 = FanRpmToRawLevel(GetFanSpeedForTemperature(1));
           if (monitorFan) {
             if (fanSpeed1 != fanSpeedNow[0] || fanSpeed2 != fanSpeedNow[1]) {
               SetFanLevel(fanSpeed1, fanSpeed2);
@@ -345,8 +381,7 @@ namespace OmenSuperHub {
           SetMaxFanSpeedOn();
         } else if (fanControl.Contains(" RPM")) {
           SetMaxFanSpeedOff();
-          int rpmValue = int.Parse(fanControl.Replace(" RPM", "").Trim());
-          SetFanLevel(rpmValue / 100, rpmValue / 100);
+          ApplyManualFanRpm(fanControl);
         }
       }
 
@@ -1805,8 +1840,7 @@ namespace OmenSuperHub {
             } else if (fanControl.Contains(" RPM")) {
               SetMaxFanSpeedOff();
               fanControlTimer.Change(Timeout.Infinite, Timeout.Infinite);
-              int rpmValue = int.Parse(fanControl.Replace(" RPM", "").Trim());
-              SetFanLevel(rpmValue / 100, rpmValue / 100);
+              ApplyManualFanRpm(fanControl);
               UpdateCheckedState("fanControlGroup", fanControl);
             }
 

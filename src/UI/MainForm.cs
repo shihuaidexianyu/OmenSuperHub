@@ -29,9 +29,12 @@ namespace OmenSuperHub {
     readonly SolidColorBrush accentOrange = new SolidColorBrush(Color.FromRgb(189, 108, 0));
     readonly SolidColorBrush accentBlue = new SolidColorBrush(Color.FromRgb(0, 103, 192));
     readonly SolidColorBrush accentGreen = new SolidColorBrush(Color.FromRgb(11, 106, 69));
+    const int ManualFanMinRpm = 1600;
+    const int ManualFanMaxRpm = 6400;
+    const int ManualFanStepRpm = 100;
 
     readonly string[] fanModeItems = { "平衡", "狂暴" };
-    readonly string[] fanControlItems = { "自动", "最大风扇", "1600 RPM", "2000 RPM", "2400 RPM", "2800 RPM", "3200 RPM", "3600 RPM" };
+    readonly string[] fanControlModeItems = { "自动", "最大风扇", "手动" };
     readonly string[] fanTableItems = { "安静模式", "降温模式" };
     readonly string[] tempSensitivityItems = { "高", "中", "低", "实时" };
     readonly string[] cpuPowerItems = { "最大", "45 W", "55 W", "65 W", "75 W", "90 W" };
@@ -60,6 +63,8 @@ namespace OmenSuperHub {
 
     ComboBox fanModeComboBox;
     ComboBox fanControlComboBox;
+    Slider manualFanRpmSlider;
+    TextBlock manualFanRpmValueText;
     ComboBox fanTableComboBox;
     ComboBox tempSensitivityComboBox;
     ComboBox cpuPowerComboBox;
@@ -72,6 +77,7 @@ namespace OmenSuperHub {
     TextBox telemetryTextBox;
     TextBox configTextBox;
     TextBox helpTextBox;
+    int lastAppliedManualFanRpm = -1;
 
     MainForm() {
       EnsureWindow();
@@ -387,19 +393,21 @@ namespace OmenSuperHub {
     }
 
     Border BuildCoolingPanel() {
-      var card = CreateCard(220);
+      var card = CreateCard(270);
       var grid = CreateSettingsGrid();
       AddTitleToGrid(grid, "散热与风扇", "调节风扇模式、转速曲线和温度响应速度。");
 
       fanModeComboBox = CreateComboBox(fanModeItems, FanModeComboBox_SelectionChanged);
-      fanControlComboBox = CreateComboBox(fanControlItems, FanControlComboBox_SelectionChanged);
+      fanControlComboBox = CreateComboBox(fanControlModeItems, FanControlComboBox_SelectionChanged);
+      var manualFanControl = CreateManualFanRpmControl();
       fanTableComboBox = CreateComboBox(fanTableItems, FanTableComboBox_SelectionChanged);
       tempSensitivityComboBox = CreateComboBox(tempSensitivityItems, TempSensitivityComboBox_SelectionChanged);
 
       AddControlRow(grid, 1, "模式", fanModeComboBox);
       AddControlRow(grid, 2, "控制", fanControlComboBox);
-      AddControlRow(grid, 3, "曲线", fanTableComboBox);
-      AddControlRow(grid, 4, "温度响应", tempSensitivityComboBox);
+      AddControlRow(grid, 3, "手动转速", manualFanControl);
+      AddControlRow(grid, 4, "曲线", fanTableComboBox);
+      AddControlRow(grid, 5, "温度响应", tempSensitivityComboBox);
       card.Child = grid;
       return card;
     }
@@ -551,7 +559,7 @@ namespace OmenSuperHub {
       grid.Children.Add(wrap);
     }
 
-    void AddControlRow(Grid grid, int rowIndex, string title, Control control) {
+    void AddControlRow(Grid grid, int rowIndex, string title, FrameworkElement control) {
       while (grid.RowDefinitions.Count <= rowIndex) {
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
       }
@@ -623,6 +631,41 @@ namespace OmenSuperHub {
       return comboBox;
     }
 
+    FrameworkElement CreateManualFanRpmControl() {
+      var wrap = new Grid();
+      wrap.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+      wrap.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+      manualFanRpmSlider = new Slider {
+        Minimum = ManualFanMinRpm,
+        Maximum = ManualFanMaxRpm,
+        TickFrequency = ManualFanStepRpm,
+        SmallChange = ManualFanStepRpm,
+        LargeChange = ManualFanStepRpm * 4,
+        IsSnapToTickEnabled = true,
+        Value = ManualFanMinRpm,
+        Margin = new Thickness(0, 8, 12, 8),
+        IsEnabled = false
+      };
+      manualFanRpmSlider.ValueChanged += ManualFanRpmSlider_ValueChanged;
+
+      manualFanRpmValueText = new TextBlock {
+        Text = $"{ManualFanMinRpm} RPM",
+        Foreground = strongText,
+        FontSize = 13,
+        FontWeight = FontWeights.SemiBold,
+        Width = 86,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextAlignment = TextAlignment.Right
+      };
+
+      Grid.SetColumn(manualFanRpmSlider, 0);
+      Grid.SetColumn(manualFanRpmValueText, 1);
+      wrap.Children.Add(manualFanRpmSlider);
+      wrap.Children.Add(manualFanRpmValueText);
+      return wrap;
+    }
+
     void RefreshDashboard() {
       if (window == null || !window.IsVisible) {
         return;
@@ -630,7 +673,13 @@ namespace OmenSuperHub {
 
       var snapshot = Program.GetDashboardSnapshot();
 
-      totalPowerText.Text = $"{snapshot.CpuPowerWatts + snapshot.GpuPowerWatts:F1} W";
+      float totalPower = snapshot.CpuPowerWatts + snapshot.GpuPowerWatts;
+      if (!snapshot.AcOnline) {
+        float? batteryDischarge = GetBatteryDischargePowerWatts(snapshot.Battery);
+        if (batteryDischarge.HasValue)
+          totalPower = batteryDischarge.Value;
+      }
+      totalPowerText.Text = $"{totalPower:F1} W";
       lastUpdateText.Text = $"最近刷新: {DateTime.Now:HH:mm:ss}";
 
       leftCpuText.Text = $"CPU {snapshot.CpuTemperature:F1}°C / {snapshot.CpuPowerWatts:F1}W";
@@ -657,7 +706,21 @@ namespace OmenSuperHub {
       syncingControlState = true;
       try {
         SelectComboItem(fanModeComboBox, snapshot.FanMode == "performance" ? "狂暴" : "平衡");
-        SelectComboItem(fanControlComboBox, ConvertFanControlValue(snapshot.FanControl));
+        int manualRpm = ParseManualFanRpm(snapshot.FanControl);
+        if (snapshot.FanControl == "auto") {
+          SelectComboItem(fanControlComboBox, "自动");
+          SetManualFanSliderEnabled(false);
+        } else if (snapshot.FanControl == "max") {
+          SelectComboItem(fanControlComboBox, "最大风扇");
+          SetManualFanSliderEnabled(false);
+        } else {
+          SelectComboItem(fanControlComboBox, "手动");
+          SetManualFanSliderEnabled(true);
+          if (manualFanRpmSlider != null) {
+            manualFanRpmSlider.Value = manualRpm;
+          }
+        }
+        UpdateManualFanRpmText(manualRpm);
         SelectComboItem(fanTableComboBox, snapshot.FanTable == "cool" ? "降温模式" : "安静模式");
         SelectComboItem(tempSensitivityComboBox, ConvertTempSensitivity(snapshot.TempSensitivity));
         SelectComboItem(cpuPowerComboBox, snapshot.CpuPowerSetting == "max" ? "最大" : snapshot.CpuPowerSetting);
@@ -694,8 +757,31 @@ namespace OmenSuperHub {
     void FanControlComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
       if (syncingControlState || fanControlComboBox.SelectedItem == null) return;
       string selected = fanControlComboBox.SelectedItem.ToString();
-      Program.ApplyFanControlSetting(selected == "自动" ? "auto" : selected == "最大风扇" ? "max" : selected);
+      if (selected == "自动") {
+        SetManualFanSliderEnabled(false);
+        Program.ApplyFanControlSetting("auto");
+      } else if (selected == "最大风扇") {
+        SetManualFanSliderEnabled(false);
+        Program.ApplyFanControlSetting("max");
+      } else {
+        SetManualFanSliderEnabled(true);
+        ApplyManualFanFromSlider(force: true);
+      }
       RefreshDashboard();
+    }
+
+    void ManualFanRpmSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) {
+      int rpm = (int)Math.Round(e.NewValue);
+      UpdateManualFanRpmText(rpm);
+
+      if (syncingControlState || fanControlComboBox?.SelectedItem == null) {
+        return;
+      }
+      if (fanControlComboBox.SelectedItem.ToString() != "手动") {
+        return;
+      }
+
+      ApplyManualFanFromSlider();
     }
 
     void FanTableComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
@@ -741,6 +827,49 @@ namespace OmenSuperHub {
       var snapshot = Program.GetDashboardSnapshot();
       Program.ApplyFloatingBarSetting(!snapshot.FloatingBarEnabled);
       RefreshDashboard();
+    }
+
+    void ApplyManualFanFromSlider(bool force = false) {
+      if (manualFanRpmSlider == null) {
+        return;
+      }
+
+      int rpm = (int)Math.Round(manualFanRpmSlider.Value);
+      if (!force && rpm == lastAppliedManualFanRpm) {
+        return;
+      }
+
+      lastAppliedManualFanRpm = rpm;
+      Program.ApplyFanControlSetting($"{rpm} RPM");
+    }
+
+    void SetManualFanSliderEnabled(bool enabled) {
+      if (manualFanRpmSlider != null) {
+        manualFanRpmSlider.IsEnabled = enabled;
+      }
+      if (manualFanRpmValueText != null) {
+        manualFanRpmValueText.Foreground = enabled ? strongText : mutedText;
+      }
+    }
+
+    void UpdateManualFanRpmText(int rpm) {
+      if (manualFanRpmValueText != null) {
+        manualFanRpmValueText.Text = $"{rpm} RPM";
+      }
+    }
+
+    int ParseManualFanRpm(string fanControlValue) {
+      if (string.IsNullOrWhiteSpace(fanControlValue) || !fanControlValue.EndsWith(" RPM")) {
+        return ManualFanMinRpm;
+      }
+
+      string text = fanControlValue.Replace(" RPM", string.Empty).Trim();
+      if (!int.TryParse(text, out int rpm)) {
+        return ManualFanMinRpm;
+      }
+
+      rpm = Math.Max(ManualFanMinRpm, Math.Min(ManualFanMaxRpm, rpm));
+      return rpm - (rpm % ManualFanStepRpm);
     }
 
     string BuildBatterySummary(DashboardSnapshot snapshot) {
@@ -876,9 +1005,15 @@ namespace OmenSuperHub {
       return null;
     }
 
+    float? GetBatteryDischargePowerWatts(BatteryTelemetry telemetry) {
+      if (telemetry == null) return null;
+      if (telemetry.Discharging && telemetry.DischargeRateMilliwatts > 0) return telemetry.DischargeRateMilliwatts / 1000f;
+      return null;
+    }
+
     string FormatFanRpm(List<int> fanSpeeds) {
       if (fanSpeeds == null || fanSpeeds.Count < 2) return "--";
-      return $"{fanSpeeds[0]} / {fanSpeeds[1]}";
+      return $"{fanSpeeds[0] * 100} / {fanSpeeds[1] * 100} RPM";
     }
 
     string FormatGfxMode(OmenGfxMode mode) {
