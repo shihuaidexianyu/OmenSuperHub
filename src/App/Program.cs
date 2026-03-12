@@ -9,7 +9,6 @@ using Microsoft.Win32.TaskScheduler;
 using System.Reflection;
 using Microsoft.Win32;
 using System.Text.RegularExpressions;
-using System.Drawing;
 using System.Threading.Tasks;
 using System.Management;
 using TaskEx = System.Threading.Tasks.Task;
@@ -127,18 +126,13 @@ namespace OmenSuperHub {
 
     internal static void ApplyFloatingBarSetting(bool enabled) {
       floatingBar = enabled ? "on" : "off";
-      if (enabled) {
-        ShowFloatingForm();
-      } else {
-        CloseFloatingForm();
-      }
-
+      RefreshShellStatus();
       SaveConfig("FloatingBar");
     }
 
     internal static void ApplyFloatingBarLocationSetting(string location) {
       floatingBarLoc = location == "right" ? "right" : "left";
-      UpdateFloatingText();
+      RefreshShellStatus();
       SaveConfig("FloatingBarLoc");
     }
 
@@ -229,23 +223,18 @@ namespace OmenSuperHub {
     static readonly FanCurveService fanCurveService = new FanCurveService();
     //static OpenComputer openComputer = new OpenComputer() { CPUEnabled = true };
     static LibreComputer libreComputer = new LibreComputer() { IsCpuEnabled = true, IsGpuEnabled = true };
+    static readonly HardwareTelemetryService hardwareTelemetryService = new HardwareTelemetryService(libreComputer);
+    static readonly AppShellService shellService = new AppShellService();
     static bool openLib = true, monitorGPU = true, monitorFan = true, powerOnline = true;
     static List<int> fanSpeedNow = new List<int> { 20, 23 };
     static List<TemperatureSensorReading> currentTemperatureSensors = new List<TemperatureSensorReading>();
     static float respondSpeed = 0.4f;
-    static readonly object floatingFormLock = new object();
     static System.Threading.Timer fanControlTimer;
     static System.Threading.Timer hardwarePollingTimer;
-    static System.Windows.Forms.Timer tooltipUpdateTimer;
     static System.Windows.Forms.Timer checkFloatingTimer, optimiseTimer;
-    static NotifyIcon trayIcon;
-    static FloatingForm floatingForm;
     static NamedPipeServerStream omenKeyPipeServer;
     static TaskEx omenKeyListenerTask;
     static int shutdownStarted = 0;
-    static int advancedStatusTick = 0;
-    static int temperatureSensorRefreshTick = 0;
-    static int advancedStatusRefreshInProgress = 0;
     static volatile bool checkFloating = false;
     static volatile bool isShuttingDown = false;
 
@@ -435,7 +424,6 @@ namespace OmenSuperHub {
         // GetFanCount
         SendOmenBiosWmi(0x10, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 4);
 
-        tooltipUpdateTimer.Start();
         countRestore = 3;
       }
 
@@ -557,10 +545,9 @@ namespace OmenSuperHub {
         AppSettingsSnapshot snapshot;
         if (settingsService.TryLoadConfig(out snapshot)) {
           customIcon = snapshot.CustomIcon;
-          if (customIcon == "custom" && !CheckCustomIcon()) {
+          if (customIcon == "custom" && !shellService.HasCustomIconFile(AppDomain.CurrentDomain.BaseDirectory)) {
             customIcon = "original";
             SaveConfig("CustomIcon");
-            trayIcon.Icon = Properties.Resources.smallfan;
             UpdateCheckedState("CustomIcon", "原版");
           }
         }
@@ -568,35 +555,8 @@ namespace OmenSuperHub {
         Console.WriteLine($"Error restoring configuration: {ex.Message}");
       }
 
-      trayIcon = new NotifyIcon() {
-        // Icon = SystemIcons.Application,
-        Icon = Properties.Resources.smallfan,
-        ContextMenuStrip = new ContextMenuStrip(),
-        Visible = true
-      };
-
-      trayIcon.MouseClick += TrayIcon_MouseClick;
-
-      switch (customIcon) {
-        case "original":
-          trayIcon.Icon = Properties.Resources.smallfan;
-          break;
-        case "custom":
-          SetCustomIcon();
-          break;
-        case "dynamic":
-          GenerateDynamicIcon((int)CPUTemp);
-          break;
-      }
-
-      // Keep tray menu minimal: only "Exit".
-      trayIcon.ContextMenuStrip.Items.Add(CreateMenuItem("退出", null, (s, e) => Exit(), false));
-
-      // Initialize tooltip update timer
-      tooltipUpdateTimer = new System.Windows.Forms.Timer();
-      tooltipUpdateTimer.Interval = 1000;
-      tooltipUpdateTimer.Tick += (s, e) => UpdateTooltip();
-      tooltipUpdateTimer.Start();
+      shellService.Initialize(OnShellTick, ShowMainWindow, Exit);
+      RefreshShellStatus();
     }
 
     static void RestoreCPUPower() {
@@ -673,10 +633,11 @@ namespace OmenSuperHub {
             batteryDischarge = currentBatteryTelemetry.DischargeRateMilliwatts / 1000f;
           }
 
+          List<TemperatureSensorReading> temperatureSensors = GetTemperatureSensorSnapshot();
           string cpuSensorSource;
           string gpuSensorSource;
-          float cpuControlTemp = SelectControlTemperature(preferCpu: true, fallback: CPUTemp, out cpuSensorSource);
-          float gpuControlTemp = SelectControlTemperature(preferCpu: false, fallback: GPUTemp, out gpuSensorSource);
+          float cpuControlTemp = hardwareTelemetryService.SelectControlTemperature(true, temperatureSensors, CPUTemp, out cpuSensorSource);
+          float gpuControlTemp = hardwareTelemetryService.SelectControlTemperature(false, temperatureSensors, GPUTemp, out gpuSensorSource);
           controlCpuTemperatureC = cpuControlTemp;
           controlGpuTemperatureC = gpuControlTemp;
           controlCpuSensorName = cpuSensorSource;
@@ -742,63 +703,12 @@ namespace OmenSuperHub {
       }
     }
 
-    static void TrayIcon_MouseClick(object sender, MouseEventArgs e) {
-      if (e.Button == MouseButtons.Left) {
-        ShowMainWindow();
-      }
-    }
-
     static bool CheckCustomIcon() {
-      string currentPath = AppDomain.CurrentDomain.BaseDirectory;
-      string iconPath = Path.Combine(currentPath, "custom.ico");
-      // 检查图标文件是否存在
-      if (File.Exists(iconPath)) {
+      if (shellService.HasCustomIconFile(AppDomain.CurrentDomain.BaseDirectory)) {
         return true;
-      } else {
-        MessageBox.Show("不存在自定义图标custom.ico", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        return false;
       }
-    }
-
-    static void SetCustomIcon() {
-      string currentPath = AppDomain.CurrentDomain.BaseDirectory;
-      string iconPath = Path.Combine(currentPath, "custom.ico");
-      // 检查图标文件是否存在
-      if (File.Exists(iconPath)) {
-        trayIcon.Icon = new Icon(iconPath);
-      } else {
-        MessageBox.Show("不存在自定义图标custom.ico", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-      }
-    }
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    extern static bool DestroyIcon(IntPtr handle);
-    static void GenerateDynamicIcon(int number) {
-      using (Bitmap bitmap = new Bitmap(128, 128)) {
-        using (Graphics graphics = Graphics.FromImage(bitmap)) {
-          graphics.Clear(Color.Transparent); // 清除背景
-          graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit; // 设置文本渲染模式为抗锯齿
-
-          string text = number.ToString("00");
-
-          Font font = new Font("Arial", 52, FontStyle.Bold);
-          // 计算文本的大小
-          SizeF textSize = graphics.MeasureString(text, font);
-
-          // 计算绘制位置，使文本居中
-          float x = (bitmap.Width - textSize.Width) / 2;
-          float y = (bitmap.Height - textSize.Height) / 8; // 改为居中
-
-          // 绘制居中的数字
-          graphics.DrawString(text, font, Brushes.Tan, new PointF(x, y));
-
-          IntPtr hIcon = bitmap.GetHicon(); // 获取 HICON 句柄
-          trayIcon.Icon = Icon.FromHandle(hIcon); // 转换为Icon对象
-
-          // 销毁图标句柄
-          DestroyIcon(hIcon);
-        }
-      }
+      MessageBox.Show("不存在自定义图标custom.ico", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+      return false;
     }
 
     // 获取显卡数字代号
@@ -1032,109 +942,16 @@ namespace OmenSuperHub {
       return processCommandService.Execute(command);
     }
 
-    static ToolStripMenuItem CreateMenuItem(string text, string group, EventHandler action, bool isChecked) {
-      var item = new ToolStripMenuItem(text) {
-        Tag = group,
-        Checked = isChecked // Set initial checked state
-      };
-      item.Click += (s, e) => {
-        if (item.Text == "解锁版本") {
-          if (!powerOnline) {
-            MessageBox.Show($"请连接交流电源", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            DBVersion = 2;
-            countDB = 0;
-            SaveConfig("DBVersion");
-            UpdateCheckedState("DBGroup", "普通版本");
-            return;
-          }
-          if (!CheckDBVersion(1)) {
-            DBVersion = 2;
-            countDB = 0;
-            SaveConfig("DBVersion");
-            UpdateCheckedState("DBGroup", "普通版本");
-            return;
-          }
-          //if(CPUPower > CPULimitDB + 1) {
-          //  MessageBox.Show($"请在CPU低负载下解锁", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-          //  DBVersion = 2;
-          //  countDB = 0;
-          //  SaveConfig("DBVersion");
-          //  UpdateCheckedState("DBGroup", "普通版本");
-          //  return;
-          //}
-        }
-        if (item.Text == "普通版本" && !CheckDBVersion(2))
-          return;
-        if (item.Text == "自定义图标" && !CheckCustomIcon())
-          return;
-
-        action(s, e); // Perform the original action
-        if (group != null) {
-          UpdateCheckedState(group, null, item);
-        }
-      };
-      return item;
-    }
-
     static void UpdateCheckedState(string group, string itemText = null, ToolStripMenuItem menuItemToCheck = null) {
-      if (menuItemToCheck == null) {
-        menuItemToCheck = FindMenuItem(trayIcon.ContextMenuStrip.Items, itemText);
-
-        if (menuItemToCheck == null)
-          return;
-      }
-
-      void UpdateMenuItemsCheckedState(ToolStripItemCollection items, ToolStripMenuItem clicked) {
-        foreach (ToolStripMenuItem menuItem in items.OfType<ToolStripMenuItem>()) {
-          // 检查是否属于同一个组
-          if (menuItem.Tag as string == group) {
-            menuItem.Checked = (menuItem == clicked);
-          }
-          // 如果当前项有子菜单，递归调用处理子菜单项
-          if (menuItem.HasDropDownItems) {
-            UpdateMenuItemsCheckedState(menuItem.DropDownItems, clicked);
-          }
-        }
-      }
-      // 从ContextMenuStrip的根菜单项开始递归
-      UpdateMenuItemsCheckedState(trayIcon.ContextMenuStrip.Items, menuItemToCheck);
+      shellService.UpdateCheckedState(group, itemText, menuItemToCheck);
     }
 
-    // 递归查找指定文本的菜单项
-    static ToolStripMenuItem FindMenuItem(ToolStripItemCollection items, string itemText, int select = 2) {
-      foreach (ToolStripMenuItem menuItem in items.OfType<ToolStripMenuItem>()) {
-        if (menuItem.Text == itemText) {
-          return menuItem;
-        }
-
-        if (menuItem.HasDropDownItems) {
-          var foundItem = FindMenuItem(menuItem.DropDownItems, itemText);
-          if (foundItem != null) {
-            // 启用或禁用对应项
-            if (select == 1)
-              foundItem.Enabled = true;
-            else if (select == 0)
-              foundItem.Enabled = false;
-            return foundItem;
-          }
-        }
-      }
-      return null;
-    }
-
-    // 状态栏定时更新任务+硬件查询+DB解锁
-    static void UpdateTooltip() {
+    static void OnShellTick() {
       if (isShuttingDown) {
         return;
       }
 
-      trayIcon.Text = traySummaryText();
-      // Console.WriteLine("UpdateTooltip");
-
-      UpdateFloatingText();
-
-      if (customIcon == "dynamic")
-        GenerateDynamicIcon((int)CPUTemp);
+      RefreshShellStatus();
 
       // 启用再禁用DB驱动
       if (countDB > 0) {
@@ -1202,469 +1019,36 @@ namespace OmenSuperHub {
       }
     }
 
-    static bool IsGpuHardware(LibreHardwareType type) {
-      return type.ToString().StartsWith("Gpu", StringComparison.OrdinalIgnoreCase);
-    }
-
-    static int GetGpuHardwarePriority(LibreHardwareType type) {
-      string name = type.ToString().ToLowerInvariant();
-      if (name.Contains("nvidia")) return 300;
-      if (name.Contains("amd")) return 200;
-      if (name.Contains("intel")) return 100;
-      if (name.StartsWith("gpu")) return 50;
-      return 0;
-    }
-
-    static int ScoreGpuTempSensorName(string sensorName) {
-      if (string.IsNullOrWhiteSpace(sensorName)) return 10;
-      string name = sensorName.ToLowerInvariant();
-      if (name.Contains("hot spot") || name.Contains("hotspot")) return 95;
-      if (name.Contains("core")) return 90;
-      if (name.Contains("junction")) return 85;
-      if (name.Contains("memory")) return 70;
-      return 50;
-    }
-
-    static int ScoreGpuPowerSensorName(string sensorName) {
-      if (string.IsNullOrWhiteSpace(sensorName)) return 10;
-      string name = sensorName.ToLowerInvariant();
-      if (name.Contains("package")) return 95;
-      if (name.Contains("total board")) return 92;
-      if (name.Contains("board")) return 90;
-      if (name.Contains("gpu power")) return 88;
-      if (name.Contains("core")) return 80;
-      return 50;
-    }
-
-    static void UpdateGpuSensorCandidate(LibreIHardware hardware, LibreISensor sensor, ref int bestTempScore, ref float bestTemp, ref int bestPowerScore, ref float bestPower) {
-      if (sensor == null || !sensor.Value.HasValue) {
-        return;
-      }
-
-      int hardwareScore = GetGpuHardwarePriority(hardware.HardwareType);
-      if (sensor.SensorType == LibreSensorType.Temperature) {
-        int score = hardwareScore + ScoreGpuTempSensorName(sensor.Name);
-        if (score > bestTempScore) {
-          bestTempScore = score;
-          bestTemp = sensor.Value.GetValueOrDefault();
-        }
-      } else if (sensor.SensorType == LibreSensorType.Power) {
-        int score = hardwareScore + ScoreGpuPowerSensorName(sensor.Name);
-        if (score > bestPowerScore) {
-          bestPowerScore = score;
-          bestPower = sensor.Value.GetValueOrDefault();
-        }
-      }
-    }
-
     static void QueryHarware() {
-      float openTempCPU = -300, libreTempCPU = -300, tempCPU = 50;
-      float openPowerCPU = -1, librePowerCPU = -1;
-      int bestGpuTempScore = int.MinValue, bestGpuPowerScore = int.MinValue;
-      float bestGpuTemp = float.NaN, bestGpuPower = float.NaN;
-      bool gpuTempFound = false, gpuPowerFound = false;
-      //if (openLib) {
-      //  foreach (OpenIHardware hardware in openComputer.Hardware) {
-      //    hardware.Update();
-
-      //    if (hardware.HardwareType == OpenHardwareType.CPU) {
-      //      // Get CPU temperature sensor
-      //      OpenISensor sensor = hardware.Sensors.FirstOrDefault(d => d.SensorType == OpenSensorType.Temperature && d.Name.Contains("Package"));
-      //      OpenISensor powerSensor = hardware.Sensors.FirstOrDefault(d => d.SensorType == OpenSensorType.Power && d.Name.Contains("CPU Package"));
-      //      if (sensor != null) {
-      //        openTempCPU = (int)sensor.Value;
-      //      }
-      //      if (powerSensor != null) {
-      //        openPowerCPU = (float)powerSensor.Value.GetValueOrDefault();
-      //      }
-      //    }
-      //  }
-      //}
-
-      foreach (LibreIHardware hardware in libreComputer.Hardware) {
-        bool isCpu = hardware.HardwareType == LibreHardwareType.Cpu;
-        bool isGpu = IsGpuHardware(hardware.HardwareType);
-        if (isCpu || isGpu) {
-          hardware.Update();
-
-          foreach (LibreISensor sensor in hardware.Sensors) {
-            if (isCpu) {
-              if (sensor.Name == "CPU Package" && sensor.SensorType == LibreSensorType.Temperature) {
-                libreTempCPU = (int)sensor.Value.GetValueOrDefault();
-              }
-              if (sensor.Name == "CPU Package" && sensor.SensorType == LibreSensorType.Power) {
-                librePowerCPU = sensor.Value.GetValueOrDefault();
-              }
-            } else if (monitorGPU && isGpu) {
-              UpdateGpuSensorCandidate(hardware, sensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
-            }
-          }
-
-          if (monitorGPU && isGpu && hardware.SubHardware != null) {
-            foreach (LibreIHardware subHardware in hardware.SubHardware) {
-              if (subHardware == null) {
-                continue;
-              }
-
-              subHardware.Update();
-              foreach (LibreISensor subSensor in subHardware.Sensors) {
-                UpdateGpuSensorCandidate(hardware, subSensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
-              }
-            }
-          }
-        }
-      }
-
-      gpuTempFound = bestGpuTempScore > int.MinValue && !float.IsNaN(bestGpuTemp);
-      gpuPowerFound = bestGpuPowerScore > int.MinValue && !float.IsNaN(bestGpuPower);
-      if (monitorGPU && gpuTempFound) {
-        GPUTemp = bestGpuTemp * respondSpeed + GPUTemp * (1.0f - respondSpeed);
-      }
-      if (monitorGPU) {
-        if (gpuPowerFound) {
-          if ((int)(bestGpuPower * 10) == 5900)
-            GPUPower = 0;
-          else
-            GPUPower = Math.Max(0f, bestGpuPower);
-        } else {
-          GPUPower = 0;
-        }
-      }
-
-      if (temperatureSensorRefreshTick <= 0) {
-        RefreshTemperatureSensorsSnapshot();
-        temperatureSensorRefreshTick = 2;
-      } else {
-        temperatureSensorRefreshTick--;
-      }
-
-      if (openLib && libreTempCPU > -299 && librePowerCPU >= 0) {
-        openLib = false;
-        //openComputer.Close();
-      }
-
-      if (openTempCPU < -299) {
-        if (libreTempCPU > -299)
-          tempCPU = libreTempCPU;
-      } else
-        tempCPU = openTempCPU;
-      CPUTemp = tempCPU * respondSpeed + CPUTemp * (1.0f - respondSpeed);
-
-      if (openPowerCPU < 0) {
-        if (librePowerCPU >= 0)
-          CPUPower = librePowerCPU;
-      } else
-        CPUPower = openPowerCPU;
-
-      if (advancedStatusTick <= 0) {
-        ScheduleAdvancedHardwareStatusRefresh();
-        advancedStatusTick = 4;
-      } else {
-        advancedStatusTick--;
-      }
-
-      if (!libreComputer.IsGpuEnabled) {
-        libreComputer.IsGpuEnabled = true;
-      }
-
-      //Console.WriteLine($"openCPU: {openTempCPU}℃, {openPowerCPU}W");
-      //Console.WriteLine($"libreCPU: {libreTempCPU}℃, {librePowerCPU}W");
-      //Console.WriteLine($"openGPU: {GPUTemp}℃, {GPUPower}W");
-
-      //string tempUnit = "°C";
-      //Console.WriteLine($"CPU: {CPU}{tempUnit}, GPU: {GPU}{tempUnit}, Max: {Math.Max(CPU, GPU + 10)}{tempUnit}");
-    }
-
-    static void RefreshTemperatureSensorsSnapshot() {
-      var readings = new List<TemperatureSensorReading>();
-
-      foreach (LibreIHardware hardware in libreComputer.Hardware) {
-        CollectTemperatureSensorsRecursive(hardware, hardware?.Name, readings);
-      }
-
-      readings.Sort((a, b) => b.Celsius.CompareTo(a.Celsius));
-      if (readings.Count > 96) {
-        readings = readings.GetRange(0, 96);
-      }
-
-      lock (temperatureSensorsLock) {
-        currentTemperatureSensors = readings;
-      }
-    }
-
-    static void CollectTemperatureSensorsRecursive(LibreIHardware hardware, string path, List<TemperatureSensorReading> readings) {
-      if (hardware == null || readings == null) {
-        return;
-      }
-
-      hardware.Update();
-
-      foreach (LibreISensor sensor in hardware.Sensors) {
-        if (sensor == null || sensor.SensorType != LibreSensorType.Temperature || !sensor.Value.HasValue) {
-          continue;
-        }
-
-        float value = sensor.Value.GetValueOrDefault();
-        if (float.IsNaN(value) || value < -50f || value > 200f) {
-          continue;
-        }
-
-        string hardwareName = string.IsNullOrWhiteSpace(path) ? (hardware.Name ?? "Unknown") : path;
-        string sensorName = string.IsNullOrWhiteSpace(sensor.Name) ? "Temperature" : sensor.Name;
-        readings.Add(new TemperatureSensorReading {
-          Name = $"{hardwareName} / {sensorName}",
-          Celsius = value
-        });
-      }
-
-      if (hardware.SubHardware == null) {
-        return;
-      }
-
-      foreach (LibreIHardware subHardware in hardware.SubHardware) {
-        if (subHardware == null) {
-          continue;
-        }
-
-        string subPath = string.IsNullOrWhiteSpace(path)
-          ? subHardware.Name
-          : $"{path} > {subHardware.Name}";
-        CollectTemperatureSensorsRecursive(subHardware, subPath, readings);
-      }
-    }
-
-    static readonly string[] CpuPreferredSensorKeywords = {
-      "cpu package",
-      "package",
-      "core max",
-      "cpu core",
-      "p-core",
-      "e-core"
-    };
-
-    static readonly string[] GpuPreferredSensorKeywords = {
-      "gpu hot spot",
-      "gpu hotspot",
-      "hot spot",
-      "hotspot",
-      "junction",
-      "gpu core",
-      "gpu temperature",
-      "memory junction",
-      "memory"
-    };
-
-    static bool LooksLikeCpuSensor(string name) {
-      if (string.IsNullOrWhiteSpace(name))
-        return false;
-
-      string lower = name.ToLowerInvariant();
-      if (lower.Contains("gpu") || lower.Contains("nvidia") || lower.Contains("radeon"))
-        return false;
-
-      return lower.Contains("cpu") ||
-             lower.Contains("p-core") ||
-             lower.Contains("e-core") ||
-             lower.Contains("ia core") ||
-             lower.Contains("package") ||
-             lower.Contains("core");
-    }
-
-    static bool LooksLikeGpuSensor(string name) {
-      if (string.IsNullOrWhiteSpace(name))
-        return false;
-
-      string lower = name.ToLowerInvariant();
-      return lower.Contains("gpu") ||
-             lower.Contains("nvidia") ||
-             lower.Contains("radeon") ||
-             lower.Contains("graphics") ||
-             lower.Contains("hot spot") ||
-             lower.Contains("hotspot") ||
-             lower.Contains("junction");
-    }
-
-    static bool ContainsAnyKeyword(string name, string[] keywords) {
-      if (string.IsNullOrWhiteSpace(name) || keywords == null)
-        return false;
-
-      string lower = name.ToLowerInvariant();
-      foreach (string keyword in keywords) {
-        if (!string.IsNullOrWhiteSpace(keyword) && lower.Contains(keyword))
-          return true;
-      }
-
-      return false;
-    }
-
-    static float SelectControlTemperature(bool preferCpu, float fallback, out string source) {
-      float bestPreferred = float.MinValue;
-      string bestPreferredName = null;
-      float bestGeneral = float.MinValue;
-      string bestGeneralName = null;
-
-      lock (temperatureSensorsLock) {
-        foreach (var reading in currentTemperatureSensors) {
-          if (reading == null || string.IsNullOrWhiteSpace(reading.Name))
-            continue;
-          if (float.IsNaN(reading.Celsius) || reading.Celsius < -50f || reading.Celsius > 200f)
-            continue;
-
-          string sensorName = reading.Name;
-          bool domainMatch = preferCpu ? LooksLikeCpuSensor(sensorName) : LooksLikeGpuSensor(sensorName);
-          if (!domainMatch)
-            continue;
-
-          if (reading.Celsius > bestGeneral) {
-            bestGeneral = reading.Celsius;
-            bestGeneralName = sensorName;
-          }
-
-          bool preferredMatch = preferCpu
-            ? ContainsAnyKeyword(sensorName, CpuPreferredSensorKeywords)
-            : ContainsAnyKeyword(sensorName, GpuPreferredSensorKeywords);
-          if (!preferredMatch)
-            continue;
-
-          if (reading.Celsius > bestPreferred) {
-            bestPreferred = reading.Celsius;
-            bestPreferredName = sensorName;
-          }
-        }
-      }
-
-      if (bestPreferredName != null) {
-        source = bestPreferredName;
-        return bestPreferred;
-      }
-
-      if (bestGeneralName != null) {
-        source = bestGeneralName;
-        return bestGeneral;
-      }
-
-      source = "fallback";
-      return fallback;
-    }
-
-    static void ScheduleAdvancedHardwareStatusRefresh() {
-      if (Interlocked.Exchange(ref advancedStatusRefreshInProgress, 1) != 0)
-        return;
-
-      TaskEx.Run(() => {
-        try {
-          RefreshAdvancedHardwareStatus();
-        } finally {
-          Interlocked.Exchange(ref advancedStatusRefreshInProgress, 0);
-        }
+      HardwareTelemetrySnapshot snapshot = hardwareTelemetryService.Poll(new HardwareTelemetryRequest {
+        CurrentCpuTemperature = CPUTemp,
+        CurrentGpuTemperature = GPUTemp,
+        CurrentCpuPowerWatts = CPUPower,
+        CurrentGpuPowerWatts = GPUPower,
+        RespondSpeed = respondSpeed,
+        MonitorGpu = monitorGPU,
+        OpenLibEnabled = openLib
       });
-    }
 
-    static void RefreshAdvancedHardwareStatus() {
-      OmenGfxMode nextGfxMode = currentGfxMode;
-      OmenGpuStatus nextGpuStatus = currentGpuStatus;
-      OmenSystemDesignData nextSystemDesignData = currentSystemDesignData;
-      OmenSmartAdapterStatus nextSmartAdapterStatus = currentSmartAdapterStatus;
-      OmenFanTypeInfo nextFanTypeInfo = currentFanTypeInfo;
-      OmenKeyboardType nextKeyboardType = currentKeyboardType;
-      BatteryTelemetry nextBatteryTelemetry = currentBatteryTelemetry;
-
-      try {
-        nextGfxMode = GetGraphicsMode();
-      } catch {
+      openLib = snapshot.OpenLibEnabled;
+      CPUTemp = snapshot.CpuTemperature;
+      GPUTemp = snapshot.GpuTemperature;
+      CPUPower = snapshot.CpuPowerWatts;
+      GPUPower = snapshot.GpuPowerWatts;
+      currentGfxMode = snapshot.GraphicsMode;
+      currentGpuStatus = snapshot.GpuStatus;
+      currentSystemDesignData = snapshot.SystemDesignData;
+      currentSmartAdapterStatus = snapshot.SmartAdapterStatus;
+      currentFanTypeInfo = snapshot.FanTypeInfo;
+      currentKeyboardType = snapshot.KeyboardType;
+      currentBatteryTelemetry = snapshot.BatteryTelemetry;
+      lock (temperatureSensorsLock) {
+        currentTemperatureSensors = snapshot.TemperatureSensors ?? new List<TemperatureSensorReading>();
       }
-
-      try {
-        var gpuStatus = GetGpuStatus();
-        if (gpuStatus != null)
-          nextGpuStatus = gpuStatus;
-      } catch {
-      }
-
-      try {
-        var designData = GetSystemDesignData();
-        if (designData != null)
-          nextSystemDesignData = designData;
-      } catch {
-      }
-
-      try {
-        nextSmartAdapterStatus = GetSmartAdapterStatus();
-      } catch {
-      }
-
-      try {
-        var fanTypeInfo = GetFanTypeInfo();
-        if (fanTypeInfo != null)
-          nextFanTypeInfo = fanTypeInfo;
-      } catch {
-      }
-
-      try {
-        nextKeyboardType = GetKeyboardType();
-      } catch {
-      }
-
-      try {
-        nextBatteryTelemetry = ReadBatteryTelemetry();
-      } catch {
-        nextBatteryTelemetry = null;
-      }
-
-      currentGfxMode = nextGfxMode;
-      currentGpuStatus = nextGpuStatus;
-      currentSystemDesignData = nextSystemDesignData;
-      currentSmartAdapterStatus = nextSmartAdapterStatus;
-      currentFanTypeInfo = nextFanTypeInfo;
-      currentKeyboardType = nextKeyboardType;
-      currentBatteryTelemetry = nextBatteryTelemetry;
-    }
-
-    static BatteryTelemetry ReadBatteryTelemetry() {
-      using (var searcher = new ManagementObjectSearcher(@"root\wmi", "SELECT PowerOnline, Charging, Discharging, DischargeRate, ChargeRate, RemainingCapacity, Voltage FROM BatteryStatus")) {
-        foreach (ManagementObject battery in searcher.Get()) {
-          return new BatteryTelemetry {
-            PowerOnline = Convert.ToBoolean(battery["PowerOnline"] ?? false),
-            Charging = Convert.ToBoolean(battery["Charging"] ?? false),
-            Discharging = Convert.ToBoolean(battery["Discharging"] ?? false),
-            DischargeRateMilliwatts = Convert.ToInt32(battery["DischargeRate"] ?? 0),
-            ChargeRateMilliwatts = Convert.ToInt32(battery["ChargeRate"] ?? 0),
-            RemainingCapacityMilliwattHours = Convert.ToInt32(battery["RemainingCapacity"] ?? 0),
-            VoltageMillivolts = Convert.ToInt32(battery["Voltage"] ?? 0)
-          };
-        }
-      }
-
-      return null;
     }
 
     static float? GetBatteryPowerWatts(BatteryTelemetry telemetry) {
-      if (telemetry == null)
-        return null;
-
-      if (telemetry.Discharging && telemetry.DischargeRateMilliwatts > 0)
-        return telemetry.DischargeRateMilliwatts / 1000f;
-
-      if (telemetry.Charging && telemetry.ChargeRateMilliwatts > 0)
-        return telemetry.ChargeRateMilliwatts / 1000f;
-
-      return null;
-    }
-
-    static string FormatBatteryMode(BatteryTelemetry telemetry) {
-      if (telemetry == null)
-        return "Unknown";
-
-      if (telemetry.Discharging)
-        return "Discharging";
-
-      if (telemetry.Charging)
-        return "Charging";
-
-      if (telemetry.PowerOnline)
-        return "AC Idle";
-
-      return "Battery Idle";
+      return HardwareTelemetryService.GetBatteryPowerWatts(telemetry);
     }
 
     internal static DashboardSnapshot GetDashboardSnapshot() {
@@ -1768,6 +1152,24 @@ namespace OmenSuperHub {
       MainForm.Instance.Activate();
     }
 
+    static void RefreshShellStatus() {
+      shellService.RefreshStatus(CreateAppShellStatus());
+    }
+
+    static AppShellStatus CreateAppShellStatus() {
+      return new AppShellStatus {
+        IconMode = customIcon,
+        TrayText = BuildTraySummaryText(),
+        DynamicIconValue = (int)CPUTemp,
+        CustomIconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "custom.ico"),
+        FloatingVisible = floatingBar == "on",
+        FloatingText = BuildMonitorText(),
+        FloatingTextSize = textSize,
+        FloatingLocation = floatingBarLoc,
+        MainWindowVisible = MainForm.IsVisibleOnScreen
+      };
+    }
+
     static string FormatGfxMode(OmenGfxMode mode) {
       switch (mode) {
         case OmenGfxMode.Hybrid:
@@ -1820,7 +1222,7 @@ namespace OmenSuperHub {
       return $"{fanTypeInfo.Fan1Type}/{fanTypeInfo.Fan2Type}";
     }
 
-    static string traySummaryText() {
+    static string BuildTraySummaryText() {
       List<string> parts = new List<string>();
       parts.Add($"CPU {CPUTemp:F0}C {CPUPower:F0}W");
 
@@ -1995,17 +1397,15 @@ namespace OmenSuperHub {
       alreadyRead = snapshot.AlreadyRead;
 
       customIcon = snapshot.CustomIcon;
+      RefreshShellStatus();
       switch (customIcon) {
         case "original":
-          trayIcon.Icon = Properties.Resources.smallfan;
           UpdateCheckedState("customIconGroup", "原版");
           break;
         case "custom":
-          SetCustomIcon();
           UpdateCheckedState("customIconGroup", "自定义图标");
           break;
         case "dynamic":
-          GenerateDynamicIcon((int)CPUTemp);
           UpdateCheckedState("customIconGroup", "动态图标");
           break;
       }
@@ -2051,7 +1451,7 @@ namespace OmenSuperHub {
       LoadPowerControlTuning();
 
       textSize = snapshot.FloatingBarSize;
-      UpdateFloatingText();
+      RefreshShellStatus();
       switch (textSize) {
         case 24:
           UpdateCheckedState("floatingBarSizeGroup", "24号");
@@ -2065,7 +1465,7 @@ namespace OmenSuperHub {
       }
 
       floatingBarLoc = snapshot.FloatingBarLocation;
-      UpdateFloatingText();
+      RefreshShellStatus();
       if (floatingBarLoc == "left") {
         UpdateCheckedState("floatingBarLocGroup", "左上角");
       } else {
@@ -2073,11 +1473,10 @@ namespace OmenSuperHub {
       }
 
       floatingBar = snapshot.FloatingBar;
+      RefreshShellStatus();
       if (floatingBar == "on") {
-        ShowFloatingForm();
         UpdateCheckedState("floatingBarGroup", "显示浮窗");
       } else {
-        CloseFloatingForm();
         UpdateCheckedState("floatingBarGroup", "关闭浮窗");
       }
     }
@@ -2113,13 +1512,12 @@ namespace OmenSuperHub {
         checkFloating = false;
         if (floatingBar == "on") {
           floatingBar = "off";
-          CloseFloatingForm();
           UpdateCheckedState("floatingBarGroup", "关闭浮窗");
         } else {
           floatingBar = "on";
-          ShowFloatingForm();
           UpdateCheckedState("floatingBarGroup", "显示浮窗");
         }
+        RefreshShellStatus();
         SaveConfig("FloatingBar");
       }
     }
@@ -2155,51 +1553,7 @@ namespace OmenSuperHub {
       });
     }
 
-    // 显示浮窗
-    static void ShowFloatingForm() {
-      lock (floatingFormLock) {
-        if (floatingForm == null || floatingForm.IsDisposed) {
-          floatingForm = new FloatingForm(monitorText(), textSize, floatingBarLoc);
-          floatingForm.Show();
-        } else {
-          floatingForm.BringToFront();
-        }
-      }
-    }
-
-    // 关闭浮窗
-    static void CloseFloatingForm() {
-      lock (floatingFormLock) {
-        if (floatingForm != null && !floatingForm.IsDisposed) {
-          floatingForm.Close();
-          floatingForm.Dispose();
-          floatingForm = null;
-        }
-      }
-    }
-
-    // 更新浮窗的文字内容
-    static void UpdateFloatingText() {
-      lock (floatingFormLock) {
-        if (floatingForm != null && !floatingForm.IsDisposed) {
-          bool mainWindowVisible = MainForm.IsVisibleOnScreen;
-          bool shouldTopMost = !mainWindowVisible;
-          if (floatingForm.TopMost != shouldTopMost) {
-            floatingForm.TopMost = shouldTopMost;
-          }
-
-          // 主窗口交互期间暂停浮窗重绘，避免下拉/展开控件闪动
-          if (mainWindowVisible) {
-            return;
-          }
-
-          floatingForm.SetText(monitorText(), textSize, floatingBarLoc);
-        }
-      }
-    }
-
-    //生成监控信息
-    static string monitorText() {
+    static string BuildMonitorText() {
       List<string> lines = new List<string>();
       lines.Add($"CPU: {CPUTemp:F1}°C  {CPUPower:F1}W");
 
@@ -2235,11 +1589,7 @@ namespace OmenSuperHub {
       SystemEvents.PowerModeChanged -= new PowerModeChangedEventHandler(OnPowerChange);
       StopAndDisposeTimers();
       DisposePipeServer();
-      CloseFloatingForm();
-      if (trayIcon != null) {
-        trayIcon.Visible = false;
-        trayIcon.Dispose();
-      }
+      shellService.Dispose();
 
       //openComputer.Close();
       libreComputer.Close();
@@ -2255,22 +1605,12 @@ namespace OmenSuperHub {
       SystemEvents.PowerModeChanged -= new PowerModeChangedEventHandler(OnPowerChange);
       StopAndDisposeTimers();
       DisposePipeServer();
-      CloseFloatingForm();
-      if (trayIcon != null) {
-        trayIcon.Visible = false;
-        trayIcon.Dispose();
-      }
+      shellService.Dispose();
 
       libreComputer.Close();
     }
 
     static void StopAndDisposeTimers() {
-      if (tooltipUpdateTimer != null) {
-        tooltipUpdateTimer.Stop();
-        tooltipUpdateTimer.Dispose();
-        tooltipUpdateTimer = null;
-      }
-
       if (hardwarePollingTimer != null) {
         hardwarePollingTimer.Dispose();
         hardwarePollingTimer = null;

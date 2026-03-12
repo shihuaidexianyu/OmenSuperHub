@@ -272,6 +272,8 @@
     <Compile Include="src\App\Services\ProcessCommandService.cs" />
     <Compile Include="src\App\Services\AppSettingsService.cs" />
     <Compile Include="src\App\Services\FanCurveService.cs" />
+    <Compile Include="src\App\Services\HardwareTelemetryService.cs" />
+    <Compile Include="src\App\Services\AppShellService.cs" />
     <Compile Include="src\UI\FloatingForm.cs">
       <SubType>Form</SubType>
     </Compile>
