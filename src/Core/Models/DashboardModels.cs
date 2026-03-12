@@ -29,6 +29,7 @@ namespace OmenSuperHub {
     public string GpuPowerSetting { get; set; }
     public int GpuClockLimit { get; set; }
     public bool FloatingBarEnabled { get; set; }
+    public string FloatingBarLocation { get; set; }
     public OmenGfxMode GraphicsMode { get; set; }
     public OmenGpuStatus GpuStatus { get; set; }
     public OmenSystemDesignData SystemDesignData { get; set; }

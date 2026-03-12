@@ -137,6 +137,12 @@ namespace OmenSuperHub {
       SaveConfig("FloatingBar");
     }
 
+    internal static void ApplyFloatingBarLocationSetting(string location) {
+      floatingBarLoc = location == "right" ? "right" : "left";
+      UpdateFloatingText();
+      SaveConfig("FloatingBarLoc");
+    }
+
     internal static void ApplySmartPowerControlSetting(bool enabled) {
       smartPowerControlEnabled = enabled;
       powerController.Reset();
@@ -1502,6 +1508,7 @@ namespace OmenSuperHub {
         GpuPowerSetting = gpuPower,
         GpuClockLimit = gpuClock,
         FloatingBarEnabled = floatingBar == "on",
+        FloatingBarLocation = floatingBarLoc,
         GraphicsMode = currentGfxMode,
         GpuStatus = currentGpuStatus == null ? null : new OmenGpuStatus {
           CustomTgpEnabled = currentGpuStatus.CustomTgpEnabled,
@@ -2205,7 +2212,17 @@ namespace OmenSuperHub {
     static void UpdateFloatingText() {
       lock (floatingFormLock) {
         if (floatingForm != null && !floatingForm.IsDisposed) {
-          floatingForm.TopMost = true;
+          bool mainWindowVisible = MainForm.IsVisibleOnScreen;
+          bool shouldTopMost = !mainWindowVisible;
+          if (floatingForm.TopMost != shouldTopMost) {
+            floatingForm.TopMost = shouldTopMost;
+          }
+
+          // 主窗口交互期间暂停浮窗重绘，避免下拉/展开控件闪动
+          if (mainWindowVisible) {
+            return;
+          }
+
           floatingForm.SetText(monitorText(), textSize, floatingBarLoc);
         }
       }
@@ -2231,11 +2248,6 @@ namespace OmenSuperHub {
 
       if (monitorFan)
         lines.Add($"FAN: {fanSpeedNow[0] * 100}/{fanSpeedNow[1] * 100} RPM");
-
-      if (smartPowerControlEnabled) {
-        string cpuCap = smartCpuLimitWatts > 0 ? $"{smartCpuLimitWatts}W" : "--";
-        lines.Add($"CTL: {smartPowerControlState} | CPU {cpuCap} | GPU {smartGpuTier}");
-      }
 
       return string.Join("\n", lines);
     }

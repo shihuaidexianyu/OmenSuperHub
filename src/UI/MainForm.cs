@@ -11,6 +11,11 @@ using static OmenSuperHub.OmenHardware;
 namespace OmenSuperHub {
   public sealed class MainForm {
     static MainForm instance;
+    public static bool IsVisibleOnScreen {
+      get {
+        return instance != null && instance.window != null && instance.window.IsVisible;
+      }
+    }
     public static MainForm Instance {
       get {
         if (instance == null) {
@@ -40,6 +45,7 @@ namespace OmenSuperHub {
     readonly string[] cpuPowerItems = { "最大", "45 W", "55 W", "65 W", "75 W", "90 W" };
     readonly string[] gpuPowerItems = { "CTGP开+DB开", "CTGP开+DB关", "CTGP关+DB关" };
     readonly string[] gpuClockItems = { "还原", "1600 MHz", "1800 MHz", "2000 MHz", "2200 MHz", "2400 MHz" };
+    readonly string[] floatingBarLocationItems = { "左上角", "右上角" };
 
     Window window;
     DispatcherTimer refreshTimer;
@@ -101,6 +107,7 @@ namespace OmenSuperHub {
     ComboBox cpuPowerComboBox;
     ComboBox gpuPowerComboBox;
     ComboBox gpuClockComboBox;
+    ComboBox floatingBarLocationComboBox;
     CheckBox smartPowerControlCheckBox;
     Button floatingBarButton;
 
@@ -612,7 +619,7 @@ namespace OmenSuperHub {
     }
 
     Border BuildOverlayPanel() {
-      var card = CreateCard(110);
+      var card = CreateCard(160);
       var grid = CreateSettingsGrid();
       AddTitleToGrid(grid, "浮窗与显示", "控制桌面浮窗显示状态。");
 
@@ -628,8 +635,10 @@ namespace OmenSuperHub {
         MinWidth = 160
       };
       floatingBarButton.Click += FloatingBarButton_Click;
+      floatingBarLocationComboBox = CreateComboBox(floatingBarLocationItems, FloatingBarLocationComboBox_SelectionChanged);
 
       AddControlRow(grid, 1, "浮窗", floatingBarButton);
+      AddControlRow(grid, 2, "位置", floatingBarLocationComboBox);
       card.Child = grid;
       return card;
     }
@@ -988,6 +997,7 @@ namespace OmenSuperHub {
         ? new SolidColorBrush(Color.FromRgb(229, 247, 240))
         : subtleFill;
       floatingBarButton.Foreground = overlayEnabled ? accentGreen : strongText;
+      SelectComboItem(floatingBarLocationComboBox, snapshot.FloatingBarLocation == "right" ? "右上角" : "左上角");
       } finally {
         syncingControlState = false;
       }
@@ -1080,6 +1090,16 @@ namespace OmenSuperHub {
       if (syncingControlState) return;
       var snapshot = Program.GetDashboardSnapshot();
       Program.ApplyFloatingBarSetting(!snapshot.FloatingBarEnabled);
+      RefreshDashboard();
+    }
+
+    void FloatingBarLocationComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+      if (syncingControlState || floatingBarLocationComboBox?.SelectedItem == null) {
+        return;
+      }
+
+      string selected = floatingBarLocationComboBox.SelectedItem.ToString();
+      Program.ApplyFloatingBarLocationSetting(selected == "右上角" ? "right" : "left");
       RefreshDashboard();
     }
 
@@ -1424,6 +1444,7 @@ namespace OmenSuperHub {
         $"Smart GPU Tier : {snapshot.SmartGpuTier}",
         $"Smart FanBoost : {(snapshot.SmartFanBoostActive ? "On" : "Off")}",
         $"Floating Bar   : {(snapshot.FloatingBarEnabled ? "开启" : "关闭")}",
+        $"Overlay Pos    : {(snapshot.FloatingBarLocation == "right" ? "右上角" : "左上角")}",
         $"GPU Control    : {FormatGpuControl(snapshot.GpuStatus)}",
         $"Adapter        : {FormatAdapterStatus(snapshot.SmartAdapterStatus)}",
         $"Capabilities   : {BuildCapabilitiesSummary(snapshot)}",
