@@ -50,6 +50,9 @@ namespace OmenSuperHub {
     public float ControlGpuTemperature { get; set; }
     public string ControlCpuSensor { get; set; }
     public string ControlGpuSensor { get; set; }
+    public float ControlCpuTempWall { get; set; }
+    public float ControlGpuTempWall { get; set; }
+    public float ControlThermalFeedback { get; set; }
     public float EstimatedSystemPowerWatts { get; set; }
     public float TargetSystemPowerWatts { get; set; }
     public int SmartCpuLimitWatts { get; set; }

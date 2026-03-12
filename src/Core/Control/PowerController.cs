@@ -29,6 +29,9 @@ namespace OmenSuperHub {
     public string Reason { get; set; }
     public float EstimatedSystemPowerWatts { get; set; }
     public float TargetSystemPowerWatts { get; set; }
+    public float CpuTempWallC { get; set; }
+    public float GpuTempWallC { get; set; }
+    public float ThermalFeedback { get; set; }
     public int CurrentCpuLimitWatts { get; set; }
     public GpuPowerTier CurrentGpuTier { get; set; }
     public bool FanBoostActive { get; set; }
@@ -48,6 +51,10 @@ namespace OmenSuperHub {
     public float GpuFanBoostOnTempC { get; set; }
     public float CpuFanBoostOffTempC { get; set; }
     public float GpuFanBoostOffTempC { get; set; }
+    public float CpuTempWallC { get; set; }
+    public float GpuTempWallC { get; set; }
+    public float CpuWallDeadbandC { get; set; }
+    public float GpuWallDeadbandC { get; set; }
     public float BatteryGuardTriggerWatts { get; set; }
     public float BatteryGuardReleaseWatts { get; set; }
 
@@ -61,6 +68,10 @@ namespace OmenSuperHub {
         GpuFanBoostOnTempC = 83f,
         CpuFanBoostOffTempC = 87f,
         GpuFanBoostOffTempC = 78f,
+        CpuTempWallC = 88f,
+        GpuTempWallC = 79f,
+        CpuWallDeadbandC = 1.2f,
+        GpuWallDeadbandC = 1.2f,
         BatteryGuardTriggerWatts = 55f,
         BatteryGuardReleaseWatts = 42f
       };
@@ -76,6 +87,10 @@ namespace OmenSuperHub {
         GpuFanBoostOnTempC = GpuFanBoostOnTempC,
         CpuFanBoostOffTempC = CpuFanBoostOffTempC,
         GpuFanBoostOffTempC = GpuFanBoostOffTempC,
+        CpuTempWallC = CpuTempWallC,
+        GpuTempWallC = GpuTempWallC,
+        CpuWallDeadbandC = CpuWallDeadbandC,
+        GpuWallDeadbandC = GpuWallDeadbandC,
         BatteryGuardTriggerWatts = BatteryGuardTriggerWatts,
         BatteryGuardReleaseWatts = BatteryGuardReleaseWatts
       };
@@ -90,6 +105,8 @@ namespace OmenSuperHub {
     const int GpuAdjustCooldownSeconds = 10;
     const int FanAdjustCooldownSeconds = 3;
     const int CpuStepWatts = 4;
+    const float ThermalIntegralDecay = 0.85f;
+    const float ThermalIntegralClamp = 12f;
 
     enum SmartState {
       Eco,
@@ -113,6 +130,8 @@ namespace OmenSuperHub {
     DateTime lastFanAdjustUtc = DateTime.MinValue;
     int currentCpuLimitWatts;
     GpuPowerTier currentGpuTier = GpuPowerTier.Max;
+    float cpuThermalIntegral;
+    float gpuThermalIntegral;
     PowerControlTuning tuning = NormalizeTuning(PowerControlTuning.CreateDefault());
 
     public static PowerControlTuning CreateDefaultTuning() {
@@ -142,6 +161,8 @@ namespace OmenSuperHub {
       lastFanAdjustUtc = DateTime.MinValue;
       currentCpuLimitWatts = 0;
       currentGpuTier = GpuPowerTier.Max;
+      cpuThermalIntegral = 0f;
+      gpuThermalIntegral = 0f;
     }
 
     public PowerControlDecision Evaluate(PowerControlInput input) {
@@ -158,9 +179,12 @@ namespace OmenSuperHub {
       float estimatedSystemPower = EstimateSystemPower(input);
       float targetSystemPower = CalculateTargetPower(input);
       float overBudget = estimatedSystemPower - targetSystemPower;
+      float cpuTempWall = GetCpuTempWall(input);
+      float gpuTempWall = GetGpuTempWall(input);
+      float thermalFeedback = ComputeThermalFeedback(input, cpuTempWall, gpuTempWall);
 
       UpdateProtectionStates(input, now, estimatedSystemPower);
-      SmartState desiredState = DecideState(input, overBudget, now);
+      SmartState desiredState = DecideState(input, overBudget, thermalFeedback);
       bool stateChanged = false;
       if (CanSwitchState(currentState, desiredState, now)) {
         currentState = desiredState;
@@ -171,16 +195,19 @@ namespace OmenSuperHub {
       int desiredCpuLimit = currentCpuLimitWatts;
       GpuPowerTier desiredGpuTier = currentGpuTier;
       bool desiredFanBoost = fanBoostActive;
-      desiredGpuTier = CalculateGpuTier(input, currentState, overBudget);
-      desiredCpuLimit = CalculateCpuLimit(input, targetSystemPower, desiredGpuTier, overBudget, currentState);
-      desiredFanBoost = CalculateFanBoost(input, currentState);
-      string reason = BuildReason(currentState, overBudget, stateChanged);
+      desiredGpuTier = CalculateGpuTier(input, currentState, overBudget, thermalFeedback);
+      desiredCpuLimit = CalculateCpuLimit(input, targetSystemPower, desiredGpuTier, overBudget, thermalFeedback, currentState);
+      desiredFanBoost = CalculateFanBoost(input, currentState, thermalFeedback);
+      string reason = BuildReason(currentState, overBudget, thermalFeedback, stateChanged);
 
       var decision = new PowerControlDecision {
         State = FormatState(currentState),
         Reason = reason,
         EstimatedSystemPowerWatts = estimatedSystemPower,
         TargetSystemPowerWatts = targetSystemPower,
+        CpuTempWallC = cpuTempWall,
+        GpuTempWallC = gpuTempWall,
+        ThermalFeedback = thermalFeedback,
         CurrentCpuLimitWatts = currentCpuLimitWatts,
         CurrentGpuTier = currentGpuTier,
         FanBoostActive = fanBoostActive,
@@ -222,6 +249,47 @@ namespace OmenSuperHub {
       if (Math.Abs(delta) <= maxStep)
         return target;
       return current + (delta > 0 ? maxStep : -maxStep);
+    }
+
+    float GetCpuTempWall(PowerControlInput input) {
+      float wall = tuning.CpuTempWallC;
+      if (!input.AcOnline)
+        wall -= 1.5f;
+      if (input.PerformanceMode && input.AcOnline)
+        wall += 0.5f;
+
+      return ClampFloat(wall, tuning.CpuRecoverTempC + 1f, tuning.CpuEmergencyTempC - 1f);
+    }
+
+    float GetGpuTempWall(PowerControlInput input) {
+      float wall = tuning.GpuTempWallC;
+      if (!input.AcOnline)
+        wall -= 1.0f;
+      if (input.PerformanceMode && input.AcOnline)
+        wall += 0.5f;
+
+      return ClampFloat(wall, tuning.GpuRecoverTempC + 1f, tuning.GpuEmergencyTempC - 1f);
+    }
+
+    float ComputeThermalFeedback(PowerControlInput input, float cpuWall, float gpuWall) {
+      float cpuError = ApplyDeadband(input.CpuTemperatureC - cpuWall, tuning.CpuWallDeadbandC);
+      float gpuError = input.MonitorGpu
+        ? ApplyDeadband(input.GpuTemperatureC - gpuWall, tuning.GpuWallDeadbandC)
+        : 0f;
+
+      cpuThermalIntegral = ClampFloat(cpuThermalIntegral * ThermalIntegralDecay + cpuError, -ThermalIntegralClamp, ThermalIntegralClamp);
+      gpuThermalIntegral = ClampFloat(gpuThermalIntegral * ThermalIntegralDecay + gpuError, -ThermalIntegralClamp, ThermalIntegralClamp);
+
+      float cpuFeedback = cpuError + cpuThermalIntegral * 0.22f;
+      float gpuFeedback = gpuError + gpuThermalIntegral * 0.22f;
+      return Math.Max(cpuFeedback, gpuFeedback);
+    }
+
+    static float ApplyDeadband(float error, float deadband) {
+      float abs = Math.Abs(error);
+      if (abs <= deadband)
+        return 0f;
+      return Math.Sign(error) * (abs - deadband);
     }
 
     float EstimateSystemPower(PowerControlInput input) {
@@ -315,7 +383,7 @@ namespace OmenSuperHub {
       }
     }
 
-    SmartState DecideState(PowerControlInput input, float overBudget, DateTime now) {
+    SmartState DecideState(PowerControlInput input, float overBudget, float thermalFeedback) {
       if (thermalProtectActive)
         return SmartState.ThermalProtect;
 
@@ -338,6 +406,9 @@ namespace OmenSuperHub {
 
         return SmartState.Eco;
       }
+
+      if (thermalFeedback >= 2.8f)
+        return SmartState.Balanced;
 
       if (overBudget >= 10f || input.CpuTemperatureC >= 90f || (input.MonitorGpu && input.GpuTemperatureC >= 82f))
         return SmartState.Balanced;
@@ -382,7 +453,7 @@ namespace OmenSuperHub {
       }
     }
 
-    string BuildReason(SmartState state, float overBudget, bool stateChanged) {
+    string BuildReason(SmartState state, float overBudget, float thermalFeedback, bool stateChanged) {
       switch (state) {
         case SmartState.ThermalProtect:
           return "thermal-ceiling";
@@ -393,13 +464,15 @@ namespace OmenSuperHub {
         case SmartState.Eco:
           return overBudget > 0f ? "power-saving" : "eco-stable";
         default:
+          if (thermalFeedback >= 1.0f)
+            return "temp-wall-feedback";
           if (overBudget > 1.5f)
             return "budget-limit";
           return stateChanged ? "state-stabilizing" : "balanced-stable";
       }
     }
 
-    GpuPowerTier CalculateGpuTier(PowerControlInput input, SmartState state, float overBudget) {
+    GpuPowerTier CalculateGpuTier(PowerControlInput input, SmartState state, float overBudget, float thermalFeedback) {
       GpuPowerTier manualTier = input.ManualGpuTier;
       if (!input.MonitorGpu)
         return manualTier;
@@ -414,12 +487,12 @@ namespace OmenSuperHub {
           desired = input.GpuTemperatureC >= 74f ? GpuPowerTier.Min : GpuPowerTier.Med;
           break;
         case SmartState.Performance:
-          desired = input.GpuTemperatureC >= 81f ? GpuPowerTier.Med : GpuPowerTier.Max;
+          desired = input.GpuTemperatureC >= 81f || thermalFeedback >= 1.8f ? GpuPowerTier.Med : GpuPowerTier.Max;
           break;
         default:
-          if (input.GpuTemperatureC >= 83f || overBudget >= 14f)
+          if (input.GpuTemperatureC >= 83f || overBudget >= 14f || thermalFeedback >= 2.8f)
             desired = GpuPowerTier.Min;
-          else if (input.GpuTemperatureC >= 77f || overBudget >= 7f)
+          else if (input.GpuTemperatureC >= 77f || overBudget >= 7f || thermalFeedback >= 1.4f)
             desired = GpuPowerTier.Med;
           else
             desired = input.PerformanceMode ? GpuPowerTier.Max : GpuPowerTier.Med;
@@ -429,7 +502,7 @@ namespace OmenSuperHub {
       return MinTier(desired, manualTier);
     }
 
-    int CalculateCpuLimit(PowerControlInput input, float targetSystemPower, GpuPowerTier desiredGpuTier, float overBudget, SmartState state) {
+    int CalculateCpuLimit(PowerControlInput input, float targetSystemPower, GpuPowerTier desiredGpuTier, float overBudget, float thermalFeedback, SmartState state) {
       int manualCpuLimit = Clamp(input.ManualCpuLimitWatts, 25, 254);
       float gpuReserve = GetGpuReserveWatts(input, desiredGpuTier);
       float thermalPenalty = Math.Max(0f, input.CpuTemperatureC - 84f) * 1.4f;
@@ -461,6 +534,12 @@ namespace OmenSuperHub {
       else if (overBudget >= 5f)
         desired = Math.Max(30, desired - 3);
 
+      if (thermalFeedback > 0f) {
+        desired = Math.Max(28, desired - (int)Math.Round(thermalFeedback * 6f));
+      } else if (thermalFeedback < -1.2f) {
+        desired = Math.Min(manualCpuLimit, desired + (int)Math.Round(Math.Abs(thermalFeedback) * 2f));
+      }
+
       if (overBudget <= -10f && input.CpuTemperatureC < 80f)
         desired = Math.Min(Math.Min(manualCpuLimit, input.AcOnline ? 125 : 70), desired + 4);
 
@@ -481,11 +560,14 @@ namespace OmenSuperHub {
       }
     }
 
-    bool CalculateFanBoost(PowerControlInput input, SmartState state) {
+    bool CalculateFanBoost(PowerControlInput input, SmartState state, float thermalFeedback) {
       if (!input.FanControlAuto)
         return false;
 
       if (state == SmartState.ThermalProtect || state == SmartState.BatteryGuard)
+        return true;
+
+      if (thermalFeedback >= 0.8f)
         return true;
 
       if (input.CpuTemperatureC >= tuning.CpuFanBoostOnTempC)
@@ -517,6 +599,10 @@ namespace OmenSuperHub {
       t.GpuFanBoostOnTempC = ClampFloat(t.GpuFanBoostOnTempC, 70f, 95f);
       t.CpuFanBoostOffTempC = ClampFloat(t.CpuFanBoostOffTempC, 65f, 98f);
       t.GpuFanBoostOffTempC = ClampFloat(t.GpuFanBoostOffTempC, 60f, 90f);
+      t.CpuTempWallC = ClampFloat(t.CpuTempWallC, 75f, 98f);
+      t.GpuTempWallC = ClampFloat(t.GpuTempWallC, 68f, 92f);
+      t.CpuWallDeadbandC = ClampFloat(t.CpuWallDeadbandC, 0.3f, 4f);
+      t.GpuWallDeadbandC = ClampFloat(t.GpuWallDeadbandC, 0.3f, 4f);
       t.BatteryGuardTriggerWatts = ClampFloat(t.BatteryGuardTriggerWatts, 30f, 100f);
       t.BatteryGuardReleaseWatts = ClampFloat(t.BatteryGuardReleaseWatts, 20f, 90f);
 
@@ -528,6 +614,14 @@ namespace OmenSuperHub {
         t.CpuFanBoostOffTempC = t.CpuFanBoostOnTempC - 1f;
       if (t.GpuFanBoostOffTempC > t.GpuFanBoostOnTempC - 1f)
         t.GpuFanBoostOffTempC = t.GpuFanBoostOnTempC - 1f;
+      if (t.CpuTempWallC > t.CpuEmergencyTempC - 1f)
+        t.CpuTempWallC = t.CpuEmergencyTempC - 1f;
+      if (t.GpuTempWallC > t.GpuEmergencyTempC - 1f)
+        t.GpuTempWallC = t.GpuEmergencyTempC - 1f;
+      if (t.CpuTempWallC < t.CpuRecoverTempC + 1f)
+        t.CpuTempWallC = t.CpuRecoverTempC + 1f;
+      if (t.GpuTempWallC < t.GpuRecoverTempC + 1f)
+        t.GpuTempWallC = t.GpuRecoverTempC + 1f;
       if (t.BatteryGuardReleaseWatts > t.BatteryGuardTriggerWatts - 3f)
         t.BatteryGuardReleaseWatts = t.BatteryGuardTriggerWatts - 3f;
 

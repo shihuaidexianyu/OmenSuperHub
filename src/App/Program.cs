@@ -214,6 +214,9 @@ namespace OmenSuperHub {
     static float controlGpuTemperatureC = 0f;
     static string controlCpuSensorName = "fallback";
     static string controlGpuSensorName = "fallback";
+    static float controlCpuTempWallC = 88f;
+    static float controlGpuTempWallC = 79f;
+    static float controlThermalFeedback = 0f;
     static float estimatedSystemPowerWatts = 0;
     static float targetSystemPowerWatts = 0;
     static int smartCpuLimitWatts = 0;
@@ -703,6 +706,9 @@ namespace OmenSuperHub {
           PowerControlDecision decision = powerController.Evaluate(input);
           smartPowerControlState = decision.State;
           smartPowerControlReason = decision.Reason;
+          controlCpuTempWallC = decision.CpuTempWallC;
+          controlGpuTempWallC = decision.GpuTempWallC;
+          controlThermalFeedback = decision.ThermalFeedback;
           estimatedSystemPowerWatts = decision.EstimatedSystemPowerWatts;
           targetSystemPowerWatts = decision.TargetSystemPowerWatts;
           smartCpuLimitWatts = decision.CurrentCpuLimitWatts;
@@ -1831,6 +1837,9 @@ namespace OmenSuperHub {
         ControlGpuTemperature = controlGpuTemperatureC,
         ControlCpuSensor = controlCpuSensorName,
         ControlGpuSensor = controlGpuSensorName,
+        ControlCpuTempWall = controlCpuTempWallC,
+        ControlGpuTempWall = controlGpuTempWallC,
+        ControlThermalFeedback = controlThermalFeedback,
         EstimatedSystemPowerWatts = estimatedSystemPowerWatts,
         TargetSystemPowerWatts = targetSystemPowerWatts,
         SmartCpuLimitWatts = smartCpuLimitWatts,
