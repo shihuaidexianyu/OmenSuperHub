@@ -12,3 +12,5 @@ _ext/
 backup/
 packages/
 *.pfx
+.codex-appdata/
+NuGet/
