@@ -642,7 +642,7 @@ namespace OmenSuperHub {
       SyncControlState(snapshot);
     }
 
-    void SyncControlState(Program.DashboardSnapshot snapshot) {
+    void SyncControlState(DashboardSnapshot snapshot) {
       syncingControlState = true;
       try {
         SelectComboItem(fanModeComboBox, snapshot.FanMode == "performance" ? "狂暴" : "平衡");
@@ -725,14 +725,14 @@ namespace OmenSuperHub {
       RefreshDashboard();
     }
 
-    string BuildBatterySummary(Program.DashboardSnapshot snapshot) {
+    string BuildBatterySummary(DashboardSnapshot snapshot) {
       if (snapshot.Battery == null) return "Battery --";
       float? power = GetBatteryPowerWatts(snapshot.Battery);
       if (power.HasValue) return $"{BuildBatteryState(snapshot.Battery)} {power.Value:F1}W";
       return $"{BuildBatteryState(snapshot.Battery)} {snapshot.BatteryPercent}%";
     }
 
-    string BuildTelemetryText(Program.DashboardSnapshot snapshot) {
+    string BuildTelemetryText(DashboardSnapshot snapshot) {
       float? batteryPower = GetBatteryPowerWatts(snapshot.Battery);
       var lines = new List<string> {
         $"CPU Temp       : {snapshot.CpuTemperature:F1} °C",
@@ -751,7 +751,7 @@ namespace OmenSuperHub {
       return string.Join(Environment.NewLine, lines);
     }
 
-    string BuildConfigText(Program.DashboardSnapshot snapshot) {
+    string BuildConfigText(DashboardSnapshot snapshot) {
       var lines = new List<string> {
         $"Mode           : {(snapshot.FanMode == "performance" ? "狂暴" : "平衡")}",
         $"Fan Control    : {ConvertFanControlValue(snapshot.FanControl)}",
@@ -791,7 +791,7 @@ namespace OmenSuperHub {
         "https://github.com/breadeding/OmenSuperHub";
     }
 
-    string BuildCapabilitiesSummary(Program.DashboardSnapshot snapshot) {
+    string BuildCapabilitiesSummary(DashboardSnapshot snapshot) {
       var parts = new List<string>();
       if (snapshot.SystemDesignData != null) {
         if (snapshot.SystemDesignData.GraphicsSwitcherSupported) parts.Add("GfxSwitch");
@@ -836,14 +836,14 @@ namespace OmenSuperHub {
       return "high";
     }
 
-    string BuildBatteryState(Program.BatteryTelemetry telemetry) {
+    string BuildBatteryState(BatteryTelemetry telemetry) {
       if (telemetry == null) return "Unknown";
       if (telemetry.Discharging) return "Discharging";
       if (telemetry.Charging) return "Charging";
       return telemetry.PowerOnline ? "AC Idle" : "Battery Idle";
     }
 
-    float? GetBatteryPowerWatts(Program.BatteryTelemetry telemetry) {
+    float? GetBatteryPowerWatts(BatteryTelemetry telemetry) {
       if (telemetry == null) return null;
       if (telemetry.Discharging && telemetry.DischargeRateMilliwatts > 0) return telemetry.DischargeRateMilliwatts / 1000f;
       if (telemetry.Charging && telemetry.ChargeRateMilliwatts > 0) return telemetry.ChargeRateMilliwatts / 1000f;

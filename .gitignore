@@ -2,7 +2,12 @@
 *.suo
 Bin/
 Obj/
+bin/
+obj/
 .vs/
 .codex-dotnet-home/
 .codex-localappdata/
+publish/
+_ext/
+backup/
 packages/
