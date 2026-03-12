@@ -269,6 +269,9 @@
     <Reference Include="WindowsFormsIntegration" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\App\Services\ProcessCommandService.cs" />
+    <Compile Include="src\App\Services\AppSettingsService.cs" />
+    <Compile Include="src\App\Services\FanCurveService.cs" />
     <Compile Include="src\UI\FloatingForm.cs">
       <SubType>Form</SubType>
     </Compile>
