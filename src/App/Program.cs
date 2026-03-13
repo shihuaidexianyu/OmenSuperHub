@@ -290,10 +290,8 @@ namespace OmenSuperHub {
         string versionString = version.ToString().Replace(".", "");
         alreadyReadCode = new Random(int.Parse(versionString)).Next(1000, 10000);
 
-        // Initialize tray icon
         InitTrayIcon();
 
-        // Initialize HardwareMonitorLib
         libreComputer.Open();
 
         optimiseTimer = new System.Windows.Forms.Timer();
@@ -315,7 +313,6 @@ namespace OmenSuperHub {
           }
         }, null, 100, 1000);
 
-        // Main loop to query CPU and GPU temperature every second
         fanControlTimer = new System.Threading.Timer((e) => {
           if (isShuttingDown) {
             return;
@@ -337,7 +334,6 @@ namespace OmenSuperHub {
         checkFloatingTimer.Tick += (s, e) => HandleFloatingBarToggle();
         checkFloatingTimer.Start();
 
-        // Restore last setting
         RestoreConfig();
 
         if (alreadyRead != alreadyReadCode) {
@@ -396,7 +392,6 @@ namespace OmenSuperHub {
 
     static int flagStart = 0;
     static void optimiseSchedule() {
-      // 延时等待风扇恢复响应
       if (flagStart < 5) {
         flagStart++;
         if (fanControl.Contains("max")) {
@@ -407,22 +402,17 @@ namespace OmenSuperHub {
         }
       }
 
-      //定时通信避免功耗锁定
       GetFanCount();
     }
 
     static void OnPowerChange(object s, PowerModeChangedEventArgs e) {
-      // 休眠重新启动
       if (e.Mode == PowerModes.Resume) {
-        // GetFanCount
         SendOmenBiosWmi(0x10, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 4);
 
         countRestore = 3;
       }
 
-      // 检查电源模式是否发生变化
       if (e.Mode == PowerModes.StatusChange) {
-        // 获取当前电源连接状态
         var powerStatus = SystemInformation.PowerStatus;
         if (powerStatus.PowerLineStatus == PowerLineStatus.Online) {
           Console.WriteLine("笔记本已连接到电源。");
@@ -434,7 +424,6 @@ namespace OmenSuperHub {
       }
     }
 
-    // 任务计划程序
     static void AutoStartEnable() {
       string currentPath = AppDomain.CurrentDomain.BaseDirectory;
 
@@ -444,9 +433,7 @@ namespace OmenSuperHub {
         td.Principal.RunLevel = TaskRunLevel.Highest;
         td.Actions.Add(new ExecAction(Path.Combine(currentPath, "OmenSuperHub.exe"), null, null));
 
-        // 设置触发器：在用户登录时触发
         LogonTrigger logonTrigger = new LogonTrigger();
-        //logonTrigger.Delay = TimeSpan.FromSeconds(10); // 延迟 10 秒
         td.Triggers.Add(logonTrigger);
 
         td.Settings.DisallowStartIfOnBatteries = false;
@@ -463,11 +450,9 @@ namespace OmenSuperHub {
 
     static void AutoStartDisable() {
       using (TaskService ts = new TaskService()) {
-        // 检查任务是否存在
         Microsoft.Win32.TaskScheduler.Task existingTask = ts.FindTask("OmenSuperHub");
 
         if (existingTask != null) {
-          // 删除任务
           ts.RootFolder.DeleteTask("OmenSuperHub");
           Console.WriteLine("任务已删除。");
         } else {
@@ -476,15 +461,12 @@ namespace OmenSuperHub {
       }
     }
 
-    // 清理旧版自启
     public static void CleanUpAndRemoveTasks() {
-      // 目标文件夹和文件定义
       string targetFolder = @"C:\Program Files\OmenSuperHub";
       string taskName = "Omen Boot";
       string file1 = @"C:\Windows\SysWOW64\silent.txt";
       string file2 = @"C:\Windows\SysWOW64\cool.txt";
 
-      // 删除目标文件夹及其内容
       if (Directory.Exists(targetFolder)) {
         string command = $"rd /s /q \"{targetFolder}\"";
         var result = ExecuteCommand(command);
@@ -493,7 +475,6 @@ namespace OmenSuperHub {
         Console.WriteLine("旧文件夹不存在");
       }
 
-      // 删除 file1
       if (File.Exists(file1)) {
         string command = $"del /f /q \"{file1}\"";
         var result = ExecuteCommand(command);
@@ -503,7 +484,6 @@ namespace OmenSuperHub {
         Console.WriteLine($"文件不存在: {file1}");
       }
 
-      // 删除 file2
       if (File.Exists(file2)) {
         string command = $"del /f /q \"{file2}\"";
         var result = ExecuteCommand(command);
@@ -513,7 +493,6 @@ namespace OmenSuperHub {
         Console.WriteLine($"文件不存在: {file2}");
       }
 
-      // 检查并删除计划任务
       string taskQueryCommand = $"schtasks /query /tn \"{taskName}\"";
       var taskQueryResult = ExecuteCommand(taskQueryCommand);
       if (taskQueryResult.ExitCode == 0) {
@@ -525,14 +504,12 @@ namespace OmenSuperHub {
         Console.WriteLine($"计划任务 \"{taskName}\" 不存在。");
       }
 
-      // 从注册表中删除开机自启项
       string regDeleteCommand = @"reg delete ""HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"" /v ""OmenSuperHub"" /f";
       var regDeleteResult = ExecuteCommand(regDeleteCommand);
       Console.WriteLine("成功取消开机自启");
       Console.WriteLine(regDeleteResult.Output);
     }
 
-    // Initialize tray icon
     static void InitTrayIcon() {
       try {
         AppSettingsSnapshot snapshot;
@@ -704,47 +681,6 @@ namespace OmenSuperHub {
       return false;
     }
 
-    // 获取显卡数字代号
-    static string GetNVIDIAModel() {
-      // 执行 nvidia-smi 命令并获取输出
-      var result = ExecuteCommand("nvidia-smi --query-gpu=name --format=csv");
-
-      // 检查命令是否成功执行
-      if (result.ExitCode == 0) {
-
-        string gpuModel;
-
-        string output = result.Output;
-
-        string[] lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-        string modelName = null;
-        // 检查是否有至少两行
-        if (lines.Length > 1) {
-          modelName = lines[1]; // 返回第二行
-        }
-
-        // 定义正则表达式以匹配第一个以数字开头的部分
-        string pattern = @"\b(\d[\w\d\-]*)\b";
-
-        // 查找第一个匹配项
-        var match = Regex.Match(output, pattern);
-        if (match.Success) {
-          gpuModel = match.Groups[1].Value; // 返回匹配到的代号部分
-          //if(modelName != null)
-          //  MessageBox.Show($"显卡型号为：{gpuModel}", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-          Console.WriteLine($"First GPU Model Code: {gpuModel}");
-          return gpuModel;
-        } else {
-          Console.WriteLine("GPU model code not found.");
-        }
-      } else {
-        Console.WriteLine($"Error executing command: {result.Error}");
-      }
-
-      return null;
-    }
-
-    // 设置显卡频率限制
     static bool SetGPUClockLimit(int freq) {
       if (freq < 210) {
         ExecuteCommand("nvidia-smi --reset-gpu-clocks");
@@ -755,179 +691,27 @@ namespace OmenSuperHub {
       }
     }
 
-    // 判断是否为最大显卡功耗并得到当前显卡功耗限制
-    // 若限制超过1W则输出当前显卡功耗限制，否则输出为负数
     static float GPUPowerLimits() {
-      // state为“当前显卡功耗限制”或“显卡功耗限制已锁定”
       string output = ExecuteCommand("nvidia-smi -q -d POWER").Output;
-      // 定义正则表达式模式以提取当前功率限制和最大功率限制
       string currentPowerLimitPattern = @"Current Power Limit\s+:\s+([\d.]+)\s+W";
       string maxPowerLimitPattern = @"Max Power Limit\s+:\s+([\d.]+)\s+W";
 
-      // 查找当前功率限制和最大功率限制的匹配项
       var currentPowerLimitMatch = Regex.Match(output, currentPowerLimitPattern);
       var maxPowerLimitMatch = Regex.Match(output, maxPowerLimitPattern);
 
-      // 检查匹配是否成功
       if (currentPowerLimitMatch.Success && maxPowerLimitMatch.Success) {
-        // 提取值并转换为浮点数
         float currentPowerLimit = float.Parse(currentPowerLimitMatch.Groups[1].Value);
         float maxPowerLimit = float.Parse(maxPowerLimitMatch.Groups[1].Value);
 
-        // 比较值并返回结果
-        if (Math.Abs(currentPowerLimit - maxPowerLimit) < 1f) // 对于浮点数比较的容差
+        if (Math.Abs(currentPowerLimit - maxPowerLimit) < 1f)
           return -currentPowerLimit;
 
         else {
           return currentPowerLimit;
         }
       } else {
-        // 无法找到所有所需的功率限制
         Console.WriteLine("Error: Unable to find both power limits in the output.");
         return -2;
-      }
-    }
-
-    static bool CheckDBVersion(int kind) {
-      ProcessResult result = ExecuteCommand("nvidia-smi");
-
-      if (result.ExitCode == 0) {
-        string pattern = @"Driver Version:\s*(\d+\.\d+)";
-        Match match = Regex.Match(result.Output, pattern);
-        string version = match.Success ? match.Groups[1].Value : null;
-
-        if (version != null) {
-          Version v1 = new Version(version);
-          Version v2 = new Version("537.42");
-          //if(kind == 2)
-          //  v2 = new Version("555.99");
-          if (v1.CompareTo(v2) >= 0) {
-            //MessageBox.Show("当前显卡驱动：" + version, "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return true;
-          } else {
-            MessageBox.Show("请安装新版显卡驱动", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return false;
-          }
-        } else {
-          MessageBox.Show($"无法找到 NVIDIA 显卡驱动版本", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-          return false;
-        }
-      } else {
-        MessageBox.Show($"查询显卡驱动失败", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        return false;
-      }
-    }
-
-    static void ChangeDBVersion(int kind) {
-      string infFileName = "nvpcf.inf";
-      string currentPath = AppDomain.CurrentDomain.BaseDirectory;
-
-      // 提取资源中的nvpcf文件到当前目录
-      string extractedInfFilePath = Path.Combine(currentPath, "nvpcf.inf");
-      string extractedSysFilePath = Path.Combine(currentPath, "nvpcf.sys");
-      string extractedCatFilePath = Path.Combine(currentPath, "nvpcf.CAT");
-
-      ExtractResourceToFile("OmenSuperHub.Resources.nvpcf_inf.inf", extractedInfFilePath);
-      ExtractResourceToFile("OmenSuperHub.Resources.nvpcf_sys.sys", extractedSysFilePath);
-      ExtractResourceToFile("OmenSuperHub.Resources.nvpcf_cat.CAT", extractedCatFilePath);
-
-      string targetVersion = "08/28/2023 31.0.15.3730";
-      string driverFile = Path.Combine(currentPath, "nvpcf.inf");
-      //if (kind == 2) {
-      //  targetVersion = "03/02/2024, 32.0.15.5546";
-      //  driverFile = Path.Combine(currentPath, "nvpcf.inf_560.70", "nvpcf.inf");
-      //}
-
-      bool hasVersion = false;
-
-      //string tempFilePath = Path.Combine(Path.GetTempPath(), "pnputil_output.txt");
-      //string command = $"pnputil /enum-drivers > \"{tempFilePath}\"";
-      //ExecuteCommand(command);
-      //string output = File.ReadAllText(tempFilePath);
-      //// 读取驱动程序列表文件
-      //var lines = output.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-
-      string command = "pnputil /enum-drivers";
-      var result = ExecuteCommand(command);
-      string output = result.Output;
-
-      // 读取驱动程序列表文件
-      var lines = output.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-      //try {
-      //  File.WriteAllLines(Path.Combine(currentPath, "driver.txt"), lines);
-      //} catch (Exception ex) {
-      //  Console.WriteLine($"Error: {ex.Message}");
-      //}
-
-      // 记录需要删除的 Published Name
-      var namesToDelete = new List<string>();
-      for (int i = 0; i < lines.Length; i++) {
-        if (lines[i].Contains($":      {infFileName}")) {
-          // 记录上一行的 Published Name
-          if (i > 0 && lines[i - 1].Contains(":")) {
-            string publishedName = lines[i - 1].Split(':')[1].Trim();
-
-            // 记录 +4 行的 Driver Version
-            if (i + 4 < lines.Length && lines[i + 4].Contains(":")) {
-              string driverVersion = lines[i + 4].Split(':')[1].Trim();
-
-              if (driverVersion != targetVersion) {
-                Console.WriteLine("发现其他版本: " + driverVersion);
-                namesToDelete.Add(publishedName);
-              } else {
-                hasVersion = true;
-                Console.WriteLine("已经存在所需版本!");
-              }
-            }
-          }
-        }
-      }
-
-      if (!hasVersion) {
-        ExecuteCommand($"pnputil /add-driver \"{driverFile}\" /install /force");
-        Console.WriteLine("成功更改DB版本!");
-      }
-
-      if (namesToDelete.Count > 0) {
-        Console.WriteLine("找到需要删除的驱动程序包:");
-        foreach (var name in namesToDelete) {
-          Console.WriteLine($"删除驱动程序包: {name}");
-          ExecuteCommand($"pnputil /delete-driver \"{name}\" /uninstall /force");
-        }
-      } else {
-        Console.WriteLine("没有需要删除的驱动程序包.");
-      }
-
-      // 清理临时文件
-      //File.Delete(driversListFile);
-
-      // 删除提取的nvpcf文件
-      DeleteExtractedFiles(extractedInfFilePath);
-      DeleteExtractedFiles(extractedSysFilePath);
-      DeleteExtractedFiles(extractedCatFilePath);
-
-      Console.WriteLine("操作完成.");
-      Console.ReadLine();
-    }
-
-    static void ExtractResourceToFile(string resourceName, string outputFilePath) {
-      using (Stream resourceStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName)) {
-        if (resourceStream != null) {
-          using (FileStream fileStream = new FileStream(outputFilePath, FileMode.Create)) {
-            resourceStream.CopyTo(fileStream);
-          }
-          Console.WriteLine($"资源文件已提取到: {outputFilePath}");
-        } else {
-          Console.WriteLine($"无法找到资源: {resourceName}");
-        }
-      }
-    }
-
-    static void DeleteExtractedFiles(string filePath) {
-      // 删除提取的文件
-      if (File.Exists(filePath)) {
-        File.Delete(filePath);
-        Console.WriteLine($"删除临时文件:{filePath}");
       }
     }
 
@@ -946,7 +730,6 @@ namespace OmenSuperHub {
 
       RefreshShellStatus();
 
-      // 启用再禁用DB驱动
       if (countDB > 0) {
         countDB--;
         if (countDB == 0) {
@@ -955,10 +738,8 @@ namespace OmenSuperHub {
           ExecuteCommand(command);
 
           float powerLimits = GPUPowerLimits();
-          // 检查显卡当前功耗限制，离电时当作解锁成功
           if (powerOnline && powerLimits >= 0) {
             tryTimes++;
-            // 失败时重试一次
             if (tryTimes == 2) {
               tryTimes = 0;
               if (CPUPower > CPULimitDB + 10)
@@ -982,28 +763,23 @@ namespace OmenSuperHub {
             if (autoStart == "off") {
               MessageBox.Show($"解锁成功！但当前未设置开机自启，解锁后若重启电脑会导致功耗异常，需要重新解锁！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
-            //MessageBox.Show($"解锁成功！\n当前最大显卡功耗锁定为：{-powerLimits:F2} W ！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
           }
           if (tryTimes == 0) {
-            // 恢复模式设定
             if (fanMode.Contains("performance")) {
               SetFanMode(0x31);
             } else if (fanMode.Contains("default")) {
               SetFanMode(0x30);
             }
 
-            // 恢复CPU功耗设定
             RestoreCPUPower();
           }
         } else if (countDB == countDBInit - 1) {
-          // 启用DB驱动
           string deviceId = "\"ACPI\\NVDA0820\\NPCF\"";
           string command = $"pnputil /enable-device {deviceId}";
           ExecuteCommand(command);
         }
       }
 
-      // 从休眠中启动后恢复配置
       if (countRestore > 0) {
         countRestore--;
         if (countRestore == 0) {

@@ -1,32 +1,38 @@
-| 项目 | 代码入口 | 实际来源 | PawnIO? | 备注 |
+# OmenSuperHub 传感器来源表
+
+本文档只描述当前项目已经收敛后的目标硬件：
+
+- `Intel Core i9-13900HX`
+- `NVIDIA GeForce RTX 4060 Laptop GPU`
+
+## 当前项目实际使用的读数
+
+| 读数 | 代码入口 | 实际来源 | 是否依赖 PawnIO | 说明 |
 |---|---|---|---|---|
-| `CpuTemperature` | [HardwareTelemetryService.cs#L107](../src/App/Services/HardwareTelemetryService.cs#L107) | `LibreHardwareMonitor` CPU 传感器 | 看 CPU 型号 | 代码硬找 `"CPU Package"` 温度 |
-| `CpuTemperature` on Intel | [IntelCpu.cs#L374](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/IntelCpu.cs#L374), [IntelCpu.cs#L579](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/IntelCpu.cs#L579) | `MSR IA32_PACKAGE_THERM_STATUS` | 是 | 通过 `IntelMsr -> PawnIO` 读 MSR |
-| `CpuTemperature` on AMD Zen | [Amd17Cpu.cs#L133](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L133), [Amd17Cpu.cs#L190](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L190) | `SMN/MSR` + `RyzenSMU` | 是 | `Tctl/Tdie/CCD` 都走 `PawnIO` 路线 |
-| `CpuPowerWatts` | [HardwareTelemetryService.cs#L110](../src/App/Services/HardwareTelemetryService.cs#L110) | `LibreHardwareMonitor` CPU 功耗传感器 | 看 CPU 型号 | 代码硬找 `"CPU Package"` 功率 |
-| `CpuPowerWatts` on Intel | [IntelCpu.cs#L441](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/IntelCpu.cs#L441), [IntelCpu.cs#L452](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/IntelCpu.cs#L452), [IntelCpu.cs#L456](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/IntelCpu.cs#L456) | Intel RAPL MSR | 是 | 通过 `PawnIO` 读能量寄存器换算功耗 |
-| `CpuPowerWatts` on AMD Zen | [Amd17Cpu.cs#L132](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L132), [Amd17Cpu.cs#L170](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L170), [Amd17Cpu.cs#L178](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L178), [Amd17Cpu.cs#L406](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Cpu/Amd17Cpu.cs#L406) | `MSR/SMN` + `RyzenSMU PM table` | 是 | 包功耗、核心功耗都偏 `PawnIO` |
-| `GpuTemperature` | [HardwareTelemetryService.cs#L121](../src/App/Services/HardwareTelemetryService.cs#L121), [HardwareTelemetryService.cs#L296](../src/App/Services/HardwareTelemetryService.cs#L296) | `LibreHardwareMonitor` GPU 温度传感器 | 通常否 | 会按名称优先选 `Hot Spot/Core/Junction` |
-| `GpuTemperature` on NVIDIA | [NvidiaGpu.cs#L87](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/NvidiaGpu.cs#L87), [NvidiaGpu.cs#L1003](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/NvidiaGpu.cs#L1003), [NvidiaGpu.cs#L1021](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/NvidiaGpu.cs#L1021) | `NVAPI` | 否 | 核心温度、热点、显存结温都不靠 `PawnIO` |
-| `GpuTemperature` on AMD dGPU | [AmdGpu.cs#L84](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L84), [AmdGpu.cs#L630](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L630), [AmdGpu.cs#L397](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L397) | `ADL / PMLog` | 否 | `GPU Core/Hot Spot/Memory` 这些都走 AMD API |
-| `GpuPowerWatts` | [HardwareTelemetryService.cs#L142](../src/App/Services/HardwareTelemetryService.cs#L142) | `LibreHardwareMonitor` GPU 功耗传感器 | 通常否 | 会优先选 `Package/Board/GPU Power/Core` |
-| `GpuPowerWatts` on NVIDIA | [NvidiaGpu.cs#L319](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/NvidiaGpu.cs#L319), [NvidiaGpu.cs#L625](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/NvidiaGpu.cs#L625) | `NVML`，部分辅以 `NVAPI` | 否 | `GPU Package` 主要来自 `NvmlDeviceGetPowerUsage` |
-| `GpuPowerWatts` on AMD dGPU | [AmdGpu.cs#L104](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L104), [AmdGpu.cs#L651](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L651), [AmdGpu.cs#L437](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/AmdGpu.cs#L437) | `ADL / PMLog` | 否 | `GPU Package/PPT/SoC/Core` 都走 AMD API |
-| `GpuPowerWatts` on Intel iGPU | [IntelIntegratedGpu.cs#L53](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/IntelIntegratedGpu.cs#L53), [IntelIntegratedGpu.cs#L60](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/IntelIntegratedGpu.cs#L60), [IntelIntegratedGpu.cs#L107](../LibreHardwareMonitor-pawnio-squashed/LibreHardwareMonitorLib/Hardware/Gpu/IntelIntegratedGpu.cs#L107) | Intel `MSR_PP1_ENERGY_STATUS` | 是 | 集显功耗是 `PawnIO` 路线 |
-| `TemperatureSensors` 列表 | [HardwareTelemetryService.cs#L317](../src/App/Services/HardwareTelemetryService.cs#L317), [HardwareTelemetryService.cs#L333](../src/App/Services/HardwareTelemetryService.cs#L333) | 所有已启用 `LibreHardwareMonitor` 温度传感器 | 混合 | 当前只会收集 CPU/GPU 组，因为没开主板/内存 |
-| `ControlCpuTemperature` / `ControlGpuTemperature` | [HardwareTelemetryService.cs#L199](../src/App/Services/HardwareTelemetryService.cs#L199) | 从 `TemperatureSensors` 列表二次挑选 | 继承上游来源 | 它自己不采集，只是从现成温度列表里选最佳项 |
-| `FanSpeeds` | [OmenHardware.cs#L85](../src/Hardware/OmenHardware.cs#L85) | HP BIOS WMI `hpqBIntM` 命令 `0x2D` | 否 | 这是 OMEN BIOS/WMI，不是 `LibreHardwareMonitor` |
-| `GraphicsMode` | [OmenHardware.cs#L114](../src/Hardware/OmenHardware.cs#L114) | HP BIOS WMI `0x52` | 否 | OMEN 专有状态 |
-| `GpuStatus` | [OmenHardware.cs#L131](../src/Hardware/OmenHardware.cs#L131) | HP BIOS WMI `0x21` | 否 | 含 `CustomTgp/Ppab/DState/ThermalThreshold` |
-| `SystemDesignData` | [OmenHardware.cs#L150](../src/Hardware/OmenHardware.cs#L150) | HP BIOS WMI `0x28` | 否 | 机型能力、风扇控制支持等 |
-| `SmartAdapterStatus` | [OmenHardware.cs#L331](../src/Hardware/OmenHardware.cs#L331) | HP BIOS WMI `0x0F` | 否 | 电源适配器能力状态 |
-| `FanTypeInfo` | [OmenHardware.cs#L102](../src/Hardware/OmenHardware.cs#L102) | HP BIOS WMI `0x2C` | 否 | 两个风扇类型 |
-| `KeyboardType` | [OmenHardware.cs#L297](../src/Hardware/OmenHardware.cs#L297) | HP BIOS WMI `0x2B` | 否 | 键盘布局/灯效类型 |
-| `Battery` 详细信息 | [HardwareTelemetryService.cs#L501](../src/App/Services/HardwareTelemetryService.cs#L501) | WMI `root\\wmi:BatteryStatus` | 否 | `PowerOnline/Charging/Discharging/Rate/Capacity/Voltage` |
-| `BatteryPercent` | [Program.cs#L1111](../src/App/Program.cs#L1111) | `SystemInformation.PowerStatus.BatteryLifePercent` | 否 | WinForms/Windows 电源状态，不走 WMI |
+| `CpuTemperature` | `src/App/Services/HardwareTelemetryService.cs` | `LibreHardwareMonitor` CPU 传感器 | 是 | 当前固定读取 `CPU Package` |
+| `CpuPowerWatts` | `src/App/Services/HardwareTelemetryService.cs` | `LibreHardwareMonitor` CPU 功耗传感器 | 是 | 当前固定读取 `CPU Package` |
+| `GpuTemperature` | `src/App/Services/HardwareTelemetryService.cs` | `LibreHardwareMonitor` NVIDIA GPU 温度传感器 | 否 | 优先 `GPU Hot Spot`，其次 `GPU Core` |
+| `GpuPowerWatts` | `src/App/Services/HardwareTelemetryService.cs` | `LibreHardwareMonitor` NVIDIA GPU 功耗传感器 | 否 | 优先 `GPU Package`，其次 `GPU Power` |
+| `TemperatureSensors` | `src/App/Services/HardwareTelemetryService.cs` | CPU + NVIDIA GPU 温度池 | 混合 | 仅用于控制和 UI 快照 |
+| `FanSpeeds` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `hpqBIntM` `0x2D` | 否 | 两个风扇当前转速原始级别 |
+| `GraphicsMode` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x52` | 否 | Hybrid / Discrete / Optimus |
+| `GpuStatus` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x21` | 否 | `CustomTgp`、`Ppab`、`DState` 等 |
+| `SystemDesignData` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x28` | 否 | 风扇控制、极限模式等能力位 |
+| `FanTypeInfo` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x2C` | 否 | 风扇类型 |
+| `SmartAdapterStatus` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x0F` | 否 | 适配器能力状态 |
+| `KeyboardType` | `src/Hardware/OmenHardware.cs` | HP BIOS WMI `0x2B` | 否 | 键盘类型 |
+| `BatteryTelemetry` | `src/App/Services/HardwareTelemetryService.cs` | WMI `BatteryStatus` | 否 | 充放电、电压、容量 |
+| `BatteryPercent` | `src/App/Program.cs` | `SystemInformation.PowerStatus` | 否 | Windows 电源状态 |
 
-最关键的结论是：
+## 当前项目不会再处理的路径
 
-- `必须靠 PawnIO` 的，主要是 `CPU 温度/CPU 功耗`，以及 `Intel 集显功耗`。
-- `不靠 PawnIO` 的，主要是 `NVIDIA/AMD 独显温度和功耗`，还有所有 `OMEN BIOS 专有状态`、`风扇读数`、`电池信息`。
-- `TemperatureSensors` 是混合来源池，里面既可能有 `PawnIO` 产出的 CPU 温度，也可能有 `NVAPI/ADL` 产出的 GPU 温度。
+- AMD CPU 传感器兼容逻辑
+- AMD dGPU 传感器兼容逻辑
+- Intel iGPU 功耗单独兼容逻辑
+- 主板 Super I/O、内存 SPD、DIMM 温度之类未启用硬件组
+
+## 结论
+
+- `PawnIO` 现在主要影响 `Intel CPU 温度` 和 `Intel CPU 功耗`
+- `RTX 4060 Laptop` 的 `GPU 温度 / GPU 功耗` 主要走 `NVAPI` / `NVML`
+- OMEN 专有控制能力主要走 HP BIOS WMI，不走 `PawnIO`

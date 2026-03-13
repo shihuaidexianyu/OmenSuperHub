@@ -1,11 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Management;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace OmenSuperHub {
   internal class OmenHardware {
@@ -14,12 +10,6 @@ namespace OmenSuperHub {
       Discrete = 0x01,
       Optimus = 0x02,
       Unknown = 0xFF
-    }
-
-    public enum OmenBacklightState : byte {
-      Unknown = 0x00,
-      Off = 0x64,
-      On = 0xE4
     }
 
     public enum OmenKeyboardType : byte {
@@ -53,11 +43,6 @@ namespace OmenSuperHub {
       public int Fan2Type { get; set; }
     }
 
-    public sealed class OmenColorTable {
-      public byte ZoneCount { get; set; }
-      public byte[] RawData { get; set; }
-    }
-
     public sealed class OmenSystemDesignData {
       public ushort PowerFlags { get; set; }
       public byte ThermalPolicyVersion { get; set; }
@@ -77,25 +62,17 @@ namespace OmenSuperHub {
       SendOmenBiosWmi(0x10, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 4);
     }
 
-    public static int QueryFanCount() {
-      byte[] fanCount = SendOmenBiosWmi(0x10, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 4);
-      return fanCount != null && fanCount.Length > 0 ? fanCount[0] : 0;
-    }
-
     public static List<int> GetFanLevel() {
-      // Send command to retrieve fan speed
       List<int> fanSpeedNow = new List<int> { 0, 0 };
       byte[] fanLevel = SendOmenBiosWmi(0x2D, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 128);
       if (fanLevel != null) {
         fanSpeedNow[0] = fanLevel[0];
         fanSpeedNow[1] = fanLevel[1];
-        //Console.WriteLine("GetFanLevel: " + level * 100);
       }
       return fanSpeedNow;
     }
 
     public static byte[] GetFanTable() {
-      // 0x19-0x34?
       return SendOmenBiosWmi(0x2F, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 128);
     }
 
@@ -142,11 +119,6 @@ namespace OmenSuperHub {
       };
     }
 
-    public static byte GetTemperatureSensorValue() {
-      byte[] data = SendOmenBiosWmi(0x23, new byte[] { 0x01, 0x00, 0x00, 0x00 }, 4);
-      return data != null && data.Length > 0 ? data[0] : (byte)0;
-    }
-
     public static OmenSystemDesignData GetSystemDesignData() {
       byte[] data = SendOmenBiosWmi(0x28, null, 128);
       if (data == null || data.Length < 9)
@@ -172,10 +144,8 @@ namespace OmenSuperHub {
       int safeFanSpeed1 = Math.Max(0, Math.Min(64, fanSpeed1));
       int safeFanSpeed2 = Math.Max(0, Math.Min(64, fanSpeed2));
       SendOmenBiosWmi(0x2E, new byte[] { (byte)safeFanSpeed1, (byte)safeFanSpeed2 }, 0);
-      //Console.WriteLine("SetFanLevel: " + fanSpeed * 100);
     }
 
-    //mode为0x31代表狂暴模式，0x30代表平衡模式
     public static void SetFanMode(byte mode) {
       SendOmenBiosWmi(0x1A, new byte[] { 0xFF, mode }, 0);
     }
@@ -192,18 +162,14 @@ namespace OmenSuperHub {
       SendOmenBiosWmi(0x22, new byte[] { 0x00, 0x00, 0x01, 0x00 }, 0);
     }
 
-    // 无作用
     public static void SetConcurrentCpuPowerLimit(byte value) {
       SendOmenBiosWmi(0x29, new byte[] { 0xFF, 0xFF, 0xFF, value }, 0);
     }
 
-    // PL1+PL2，立即生效，狂暴平衡都生效，直接对应功率W，1-254，需关闭ts，再点击狂暴模式失效
     public static void SetCpuPowerLimit(byte value) {
       SendOmenBiosWmi(0x29, new byte[] { value, value, 0xFF, 0xFF }, 0);
-      //Console.WriteLine("SetCpuPowerLimit: " + value);
     }
 
-    // PL4，狂暴平衡都生效，50-19，100-54，180-106，200-122，需关闭ts，1-254，和SetCpuPowerLimit优先级相同
     public static void SetCpuPowerMaxLimit(byte value) {
       SendOmenBiosWmi(0x29, new byte[] { 0xFF, 0xFF, value, 0xFF }, 0);
     }
@@ -214,66 +180,6 @@ namespace OmenSuperHub {
 
     public static void SetMaxFanSpeedOff() {
       SendOmenBiosWmi(0x27, new byte[] { 0x00 }, 0);
-    }
-
-    public static void BacklightOn() {
-      SendOmenBiosWmi(0x05, new byte[] { 0xE4 }, 0, 0x20009);
-    }
-
-    public static void BacklightOff() {
-      SendOmenBiosWmi(0x05, new byte[] { 0x64 }, 0, 0x20009);
-    }
-
-    public static bool HasBacklightSupport() {
-      byte[] data = SendOmenBiosWmi(0x01, new byte[] { 0x00 }, 4, 0x20009);
-      return data != null && data.Length > 0 && (data[0] & 0x01) != 0;
-    }
-
-    public static OmenBacklightState GetBacklightState() {
-      byte[] data = SendOmenBiosWmi(0x04, new byte[] { 0x00 }, 128, 0x20009);
-      if (data == null || data.Length == 0)
-        return OmenBacklightState.Unknown;
-
-      if (data[0] == (byte)OmenBacklightState.Off)
-        return OmenBacklightState.Off;
-      if (data[0] == (byte)OmenBacklightState.On)
-        return OmenBacklightState.On;
-      return OmenBacklightState.Unknown;
-    }
-
-    public static OmenColorTable GetColorTable() {
-      byte[] data = SendOmenBiosWmi(0x02, new byte[] { 0x00 }, 128, 0x20009);
-      if (data == null || data.Length == 0)
-        return null;
-
-      return new OmenColorTable {
-        ZoneCount = data[0],
-        RawData = data
-      };
-    }
-
-    public static void SetColorTable(byte[] colorTable) {
-      if (colorTable == null || colorTable.Length == 0)
-        throw new ArgumentException("Color table cannot be empty.", nameof(colorTable));
-
-      SendOmenBiosWmi(0x03, colorTable, 0, 0x20009);
-    }
-
-    public static void SetlightColor() {
-      byte[] dataIn = new byte[128];
-      dataIn[0] = 0x03;
-      for (int i = 25; i <= 36; i++)
-        dataIn[i] = 0x80;
-      SendOmenBiosWmi(0x03, dataIn, 0, 0x20009);
-    }
-
-    public static string GetBornOnDate() {
-      byte[] data = SendOmenBiosWmi(0x10, null, 128, 0x01);
-      if (data == null || data.Length < 8)
-        return null;
-
-      string date = Encoding.ASCII.GetString(data, 0, 8);
-      return date.TrimEnd('\0');
     }
 
     public static OmenKeyboardType GetKeyboardType() {
@@ -300,16 +206,6 @@ namespace OmenSuperHub {
       return data != null && data.Length > 0 && data[0] != 0;
     }
 
-    public static bool HasMemoryOverclockingSupport() {
-      byte[] data = SendOmenBiosWmi(0x18, new byte[] { 0x00 }, 128);
-      return data != null && data.Length > 2 && data[2] != 0;
-    }
-
-    public static bool HasBiosOverclockingSupport() {
-      byte[] data = SendOmenBiosWmi(0x35, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 128);
-      return data != null && data.Length > 2 && data[2] != 0;
-    }
-
     public static OmenSmartAdapterStatus GetSmartAdapterStatus() {
       byte[] data = SendOmenBiosWmi(0x0F, null, 4, 0x01);
       if (data == null || data.Length < 2)
@@ -332,14 +228,6 @@ namespace OmenSuperHub {
       }
     }
 
-    public static bool? GetIdleModeEnabled() {
-      byte[] data = SendOmenBiosWmi(0x31, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 4);
-      if (data == null || data.Length == 0)
-        return null;
-
-      return data[0] != 0;
-    }
-
     public static ManagementObjectSearcher searcher;
     public static ManagementObject biosMethods;
     static readonly object biosLock = new object();
@@ -359,12 +247,11 @@ namespace OmenSuperHub {
     public static byte[] SendOmenBiosWmi(uint commandType, byte[] data, int outputSize, uint command = 0x20008) {
       const string namespaceName = @"root\wmi";
       const string className = "hpqBIntM";
-      string methodName = "hpqBIOSInt" + outputSize.ToString(); // Change here
+      string methodName = "hpqBIOSInt" + outputSize.ToString();
       byte[] sign = { 0x53, 0x45, 0x43, 0x55 };
 
       lock (biosLock) {
         try {
-          // Prepare the request
           using (var biosDataIn = new ManagementClass(namespaceName, "hpqBDataIn", null).CreateInstance()) {
             biosDataIn["Command"] = command;
             biosDataIn["CommandType"] = commandType;
@@ -376,7 +263,6 @@ namespace OmenSuperHub {
               biosDataIn["Size"] = (uint)0;
             }
 
-            // Obtain BIOS method class instance
             if (searcher == null)
               searcher = new ManagementObjectSearcher(namespaceName, $"SELECT * FROM {className}");
             if (biosMethods == null)
@@ -384,22 +270,16 @@ namespace OmenSuperHub {
             if (biosMethods == null)
               return null;
 
-            // Make a call to write to the BIOS
-            var inParams = biosMethods.GetMethodParameters(methodName); // Change here
+            var inParams = biosMethods.GetMethodParameters(methodName);
             inParams["InData"] = biosDataIn;
 
-            var result = biosMethods.InvokeMethod(methodName, inParams, null); // Change here
+            var result = biosMethods.InvokeMethod(methodName, inParams, null);
             var outData = result["OutData"] as ManagementBaseObject;
             uint returnCode = (uint)outData["rwReturnCode"];
 
             if (returnCode == 0) {
-              // If operation completed successfully
               if (outputSize != 0) {
-                var outputData = (byte[])outData["Data"];
-                // Console.WriteLine("+ OK: " + BitConverter.ToString(outputData));
-                return outputData;
-              } else {
-                // Console.WriteLine("+ OK");
+                return (byte[])outData["Data"];
               }
             } else {
               Console.WriteLine("- Failed: Error " + returnCode);
@@ -447,8 +327,6 @@ namespace OmenSuperHub {
         foreach (ManagementObject mo in searcher.Get()) {
           mo.Delete();
         }
-
-        //Console.WriteLine("Omen Key Off completed successfully.");
       } catch (Exception ex) {
         Console.WriteLine("Error: " + ex.Message);
       }
@@ -461,10 +339,8 @@ namespace OmenSuperHub {
       try {
         scope.Connect();
 
-        // Create CommandLineEventConsumer
         var consumerClass = new ManagementClass(scope, new ManagementPath("CommandLineEventConsumer"), null);
         var consumer = consumerClass.CreateInstance();
-        string currentPath = AppDomain.CurrentDomain.BaseDirectory;
         if (method == "custom") {
           consumer["CommandLineTemplate"] = @"cmd /c echo OmenKeyTriggered > \\.\pipe\OmenSuperHubPipe";
         } else {
@@ -473,7 +349,6 @@ namespace OmenSuperHub {
         consumer["Name"] = "OmenKeyConsumer";
         consumer.Put();
 
-        // Create EventFilter
         var filterClass = new ManagementClass(scope, new ManagementPath("__EventFilter"), null);
         var filter = filterClass.CreateInstance();
         filter["EventNameSpace"] = @"root\wmi";
@@ -482,14 +357,11 @@ namespace OmenSuperHub {
         filter["QueryLanguage"] = "WQL";
         filter.Put();
 
-        // Create FilterToConsumerBinding
         var bindingClass = new ManagementClass(scope, new ManagementPath("__FilterToConsumerBinding"), null);
         var binding = bindingClass.CreateInstance();
         binding["Consumer"] = new ManagementPath(@"root\subscription:CommandLineEventConsumer.Name='OmenKeyConsumer'");
         binding["Filter"] = new ManagementPath(@"root\subscription:__EventFilter.Name='OmenKeyFilter'");
         binding.Put();
-
-        //Console.WriteLine("Omen Key On completed successfully.");
       } catch (Exception ex) {
         Console.WriteLine("Error: " + ex.Message);
       }

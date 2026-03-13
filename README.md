@@ -1,40 +1,64 @@
-关于OmenSuperHub
-=
-本程序主要功能包括伪装OGH，风扇控制，CPU和GPU功率控制，DB版本切换，Omen键自定义以及温度/功率监控。
-OmenSuperHub实现了惠普暗夜精灵（HP OMEN）系列的控制软件Omen Gaming Hub的大多数有用功能，但不连接网络，且没有广告、壁纸等无用功能。
+# OmenSuperHub
 
-* 程序设计主要基于暗影精灵9 Intel笔记本（i9-13900HX + 4060），不保证能在所有平台正常运行
+`OmenSuperHub` 是一个面向单一目标硬件的本地控制工具，用来替代 `OMEN Gaming Hub` 的核心功能：风扇控制、CPU/GPU 功率控制、DB 驱动切换、OMEN 键自定义，以及温度/功率监控。
 
-* 目前已知**能正常使用的机型**包括**暗影精灵8p，8pp，9，9p，10，光影精灵10**
+## 当前目标
 
-* 目前已知**不支持的机型**包括**暗影精灵6**
+- 机型定位：`Intel Core i9-13900HX + NVIDIA GeForce RTX 4060 Laptop GPU`
+- 平台要求：Windows、`.NET Framework 4.8`、`x64`
+- 项目现状：代码和文档都按这套 Intel + NVIDIA 组合收敛，不再尝试覆盖 AMD CPU、AMD dGPU 或更广泛的 OMEN 兼容性矩阵
 
-* 在不支持的机型上使用可能出现无法读取数据、蓝屏或其他后果。
+## 主要能力
 
-* 为了避免功能冲突，启动前应关闭OmenCommandCenterBackground进程或卸载OGH
+- 通过 HP BIOS WMI 读写 OMEN 专有状态
+- 通过 `LibreHardwareMonitor-pawnio` 读取 Intel CPU 遥测
+- 通过 `NVAPI` / `NVML` 读取 NVIDIA dGPU 温度和功耗
+- 通过任务栏和浮窗显示实时状态
+- 通过计划任务实现管理员权限自启动
 
-* 在任务栏可查看信息或右键菜单切换模式，不会因退出OGH而锁功耗
+## 构建
 
-* 要长时间使用本程序替代OGH，请关闭OGH自启动并开启OSH自启
+首次构建或本地缺少 `packages` 目录时，先恢复 `packages.config` 依赖：
 
-* 在右键菜单“关于OSH”中可查看更多说明
+```powershell
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" OmenSuperHub.sln /t:Restore /p:RestorePackagesConfig=true /v:minimal
+```
 
-链接
-=
-* **@GeographicCone**的[OmenMon](https://github.com/OmenMon/OmenMon)
+然后执行 `x64 Release` 构建：
 
-* **@GeographicCone**的[OmenHwCtl](https://github.com/GeographicCone/OmenHwCtl)
+```powershell
+dotnet build OmenSuperHub.sln -c Release -p:Platform=x64
+```
 
-这两个项目是本项目的主要灵感来源，作者不仅给出了交互命令，还给出了探索OGH交互的方法，可惜的是缺少对较新机型的支持且已经停止更新，可能无法脱离OGH运行。
+输出文件位于：
 
-* [OpenHardwareMonitorLib](https://openhardwaremonitor.org)
+```text
+bin\x64\Release\OmenSuperHub.exe
+```
 
-* [hexagon-oss](https://github.com/hexagon-oss/openhardwaremonitor)对OpenHardwareMonitor的硬件库进行了更新
+如果正在运行 `OmenSuperHub.exe`，重建前需要先关闭它，否则输出文件可能被占用。
 
-* [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+## 运行说明
 
-本项目获取CPU和GPU温度的方法来源于这几个项目。
+- 启动前建议关闭 `OmenCommandCenterBackground`，避免和官方 OGH 同时控制同一组 BIOS/WMI 接口
+- 长期替代 OGH 使用时，建议关闭 OGH 自启动，再启用 `OmenSuperHub` 自启动
+- 本程序直接和 BIOS/WMI、驱动、电源策略交互，错误使用可能导致异常功耗、读数异常或系统不稳定
 
-免责声明
-=
-本程序不属于HP或Omen，品牌名称仅供参考，本程序与硬件交互，可能具有潜在危险或破坏性，使用者自行承担使用本程序的所有后果。
+## 传感器来源
+
+- `CPU 温度 / CPU 功耗`：`LibreHardwareMonitor-pawnio`，Intel 路径依赖 `PawnIO`
+- `NVIDIA GPU 温度 / GPU 功耗`：`NVAPI` / `NVML`，不依赖 `PawnIO`
+- `风扇转速 / 显卡模式 / Smart Adapter / 键盘类型`：HP BIOS WMI
+- `电池状态`：WMI `BatteryStatus` + Windows 电源状态
+
+更细的来源说明见 [research/sensor.md](research/sensor.md)。
+
+## 来源与致谢
+
+- [OmenMon](https://github.com/OmenMon/OmenMon)
+- [OmenHwCtl](https://github.com/GeographicCone/OmenHwCtl)
+- [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+
+## 免责声明
+
+本项目不属于 HP 或 OMEN。品牌名称仅用于说明兼容目标。本程序会直接访问硬件和系统接口，使用者需自行承担相关风险。
