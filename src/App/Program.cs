@@ -12,11 +12,6 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Management;
 using TaskEx = System.Threading.Tasks.Task;
-//using OpenComputer = OpenHardwareMonitor.Hardware.Computer;
-//using OpenIHardware = OpenHardwareMonitor.Hardware.IHardware;
-//using OpenHardwareType = OpenHardwareMonitor.Hardware.HardwareType;
-//using OpenISensor = OpenHardwareMonitor.Hardware.ISensor;
-//using OpenSensorType = OpenHardwareMonitor.Hardware.SensorType;
 using LibreComputer = LibreHardwareMonitor.Hardware.Computer;
 using LibreIHardware = LibreHardwareMonitor.Hardware.IHardware;
 using LibreHardwareType = LibreHardwareMonitor.Hardware.HardwareType;
@@ -221,11 +216,10 @@ namespace OmenSuperHub {
     static readonly ProcessCommandService processCommandService = new ProcessCommandService();
     static readonly AppSettingsService settingsService = new AppSettingsService();
     static readonly FanCurveService fanCurveService = new FanCurveService();
-    //static OpenComputer openComputer = new OpenComputer() { CPUEnabled = true };
     static LibreComputer libreComputer = new LibreComputer() { IsCpuEnabled = true, IsGpuEnabled = true };
     static readonly HardwareTelemetryService hardwareTelemetryService = new HardwareTelemetryService(libreComputer);
     static readonly AppShellService shellService = new AppShellService();
-    static bool openLib = true, monitorGPU = true, monitorFan = true, powerOnline = true;
+    static bool monitorGPU = true, monitorFan = true, powerOnline = true;
     static List<int> fanSpeedNow = new List<int> { 20, 23 };
     static List<TemperatureSensorReading> currentTemperatureSensors = new List<TemperatureSensorReading>();
     static float respondSpeed = 0.4f;
@@ -300,7 +294,6 @@ namespace OmenSuperHub {
         InitTrayIcon();
 
         // Initialize HardwareMonitorLib
-        //openComputer.Open();
         libreComputer.Open();
 
         optimiseTimer = new System.Windows.Forms.Timer();
@@ -1026,11 +1019,9 @@ namespace OmenSuperHub {
         CurrentCpuPowerWatts = CPUPower,
         CurrentGpuPowerWatts = GPUPower,
         RespondSpeed = respondSpeed,
-        MonitorGpu = monitorGPU,
-        OpenLibEnabled = openLib
+        MonitorGpu = monitorGPU
       });
 
-      openLib = snapshot.OpenLibEnabled;
       CPUTemp = snapshot.CpuTemperature;
       GPUTemp = snapshot.GpuTemperature;
       CPUPower = snapshot.CpuPowerWatts;
@@ -1590,8 +1581,6 @@ namespace OmenSuperHub {
       StopAndDisposeTimers();
       DisposePipeServer();
       shellService.Dispose();
-
-      //openComputer.Close();
       libreComputer.Close();
       Application.Exit();
     }

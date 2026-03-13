@@ -267,24 +267,6 @@ namespace OmenSuperHub {
       SendOmenBiosWmi(0x03, dataIn, 0, 0x20009);
     }
 
-    //// 似乎没有作用
-    //public static void InitializeIntelOC() {
-    //  string outputData = SendOmenBiosWmi(0x35, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 128);
-    //  //Console.WriteLine("+ OK: " + outputData);
-    //}
-
-    //// 可导致直接黑屏
-    //public static void SetVoltageOffset(int volOff) {
-    //  byte[] dataIn = new byte[128];
-    //  dataIn[0] = 0x00;
-    //  dataIn[1] = 0x03;
-    //  dataIn[2] = (byte)(volOff < 0 ? 0 : 1);
-    //  dataIn[3] = (byte)(Math.Abs(volOff) / 256);
-    //  dataIn[4] = (byte)(Math.Abs(volOff) % 256);
-    //  string outputData = SendOmenBiosWmi(0x37, dataIn, 4);
-    //  Console.WriteLine("+ OK: " + outputData);
-    //}
-
     public static string GetBornOnDate() {
       byte[] data = SendOmenBiosWmi(0x10, null, 128, 0x01);
       if (data == null || data.Length < 8)

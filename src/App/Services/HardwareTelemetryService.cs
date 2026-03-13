@@ -19,11 +19,9 @@ namespace OmenSuperHub {
     public float CurrentGpuPowerWatts { get; set; }
     public float RespondSpeed { get; set; }
     public bool MonitorGpu { get; set; }
-    public bool OpenLibEnabled { get; set; }
   }
 
   internal sealed class HardwareTelemetrySnapshot {
-    public bool OpenLibEnabled { get; set; }
     public float CpuTemperature { get; set; }
     public float GpuTemperature { get; set; }
     public float CpuPowerWatts { get; set; }
@@ -79,10 +77,8 @@ namespace OmenSuperHub {
     }
 
     public HardwareTelemetrySnapshot Poll(HardwareTelemetryRequest request) {
-      float openTempCPU = -300f;
       float libreTempCPU = -300f;
       float tempCPU = 50f;
-      float openPowerCPU = -1f;
       float librePowerCPU = -1f;
       int bestGpuTempScore = int.MinValue;
       int bestGpuPowerScore = int.MinValue;
@@ -92,7 +88,6 @@ namespace OmenSuperHub {
       bool gpuPowerFound;
       float nextGpuTemp = request.CurrentGpuTemperature;
       float nextGpuPower = request.CurrentGpuPowerWatts;
-      bool openLibEnabled = request.OpenLibEnabled;
 
       foreach (LibreIHardware hardware in libreComputer.Hardware) {
         bool isIntelCpu = hardware.HardwareType == LibreHardwareType.Cpu;
@@ -149,22 +144,12 @@ namespace OmenSuperHub {
         temperatureSensorRefreshTick--;
       }
 
-      if (openLibEnabled && libreTempCPU > -299f && librePowerCPU >= 0f) {
-        openLibEnabled = false;
-      }
-
-      if (openTempCPU < -299f) {
-        if (libreTempCPU > -299f) {
-          tempCPU = libreTempCPU;
-        }
-      } else {
-        tempCPU = openTempCPU;
+      if (libreTempCPU > -299f) {
+        tempCPU = libreTempCPU;
       }
 
       float nextCpuTemp = tempCPU * request.RespondSpeed + request.CurrentCpuTemperature * (1.0f - request.RespondSpeed);
-      float nextCpuPower = openPowerCPU < 0f
-        ? (librePowerCPU >= 0f ? librePowerCPU : request.CurrentCpuPowerWatts)
-        : openPowerCPU;
+      float nextCpuPower = librePowerCPU >= 0f ? librePowerCPU : request.CurrentCpuPowerWatts;
 
       if (advancedStatusTick <= 0) {
         ScheduleAdvancedHardwareStatusRefresh();
@@ -179,7 +164,6 @@ namespace OmenSuperHub {
 
       lock (stateLock) {
         return new HardwareTelemetrySnapshot {
-          OpenLibEnabled = openLibEnabled,
           CpuTemperature = nextCpuTemp,
           GpuTemperature = nextGpuTemp,
           CpuPowerWatts = nextCpuPower,
