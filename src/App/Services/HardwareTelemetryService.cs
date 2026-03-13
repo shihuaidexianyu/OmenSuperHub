@@ -39,6 +39,8 @@ namespace OmenSuperHub {
   }
 
   internal sealed class HardwareTelemetryService {
+    // This service is intentionally narrowed to the supported target hardware:
+    // Intel CPU + NVIDIA dGPU.
     readonly LibreComputer libreComputer;
     readonly object stateLock = new object();
     int advancedStatusTick;
@@ -55,23 +57,21 @@ namespace OmenSuperHub {
 
     static readonly string[] CpuPreferredSensorKeywords = {
       "cpu package",
-      "package",
       "core max",
       "cpu core",
       "p-core",
-      "e-core"
+      "e-core",
+      "ia core"
     };
 
     static readonly string[] GpuPreferredSensorKeywords = {
       "gpu hot spot",
       "gpu hotspot",
-      "hot spot",
-      "hotspot",
-      "junction",
       "gpu core",
-      "gpu temperature",
-      "memory junction",
-      "memory"
+      "gpu package",
+      "gpu power",
+      "gpu memory junction",
+      "gpu board power"
     };
 
     public HardwareTelemetryService(LibreComputer libreComputer) {
@@ -95,27 +95,27 @@ namespace OmenSuperHub {
       bool openLibEnabled = request.OpenLibEnabled;
 
       foreach (LibreIHardware hardware in libreComputer.Hardware) {
-        bool isCpu = hardware.HardwareType == LibreHardwareType.Cpu;
-        bool isGpu = IsGpuHardware(hardware.HardwareType);
-        if (!isCpu && !isGpu) {
+        bool isIntelCpu = hardware.HardwareType == LibreHardwareType.Cpu;
+        bool isNvidiaGpu = hardware.HardwareType == LibreHardwareType.GpuNvidia;
+        if (!isIntelCpu && !isNvidiaGpu) {
           continue;
         }
 
         hardware.Update();
         foreach (LibreISensor sensor in hardware.Sensors) {
-          if (isCpu) {
+          if (isIntelCpu) {
             if (sensor.Name == "CPU Package" && sensor.SensorType == LibreSensorType.Temperature) {
               libreTempCPU = (int)sensor.Value.GetValueOrDefault();
             }
             if (sensor.Name == "CPU Package" && sensor.SensorType == LibreSensorType.Power) {
               librePowerCPU = sensor.Value.GetValueOrDefault();
             }
-          } else if (request.MonitorGpu && isGpu) {
-            UpdateGpuSensorCandidate(hardware, sensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
+          } else if (request.MonitorGpu && isNvidiaGpu) {
+            UpdateNvidiaGpuSensorCandidate(sensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
           }
         }
 
-        if (request.MonitorGpu && isGpu && hardware.SubHardware != null) {
+        if (request.MonitorGpu && isNvidiaGpu && hardware.SubHardware != null) {
           foreach (LibreIHardware subHardware in hardware.SubHardware) {
             if (subHardware == null) {
               continue;
@@ -123,7 +123,7 @@ namespace OmenSuperHub {
 
             subHardware.Update();
             foreach (LibreISensor subSensor in subHardware.Sensors) {
-              UpdateGpuSensorCandidate(hardware, subSensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
+              UpdateNvidiaGpuSensorCandidate(subSensor, ref bestGpuTempScore, ref bestGpuTemp, ref bestGpuPowerScore, ref bestGpuPower);
             }
           }
         }
@@ -259,54 +259,19 @@ namespace OmenSuperHub {
       return null;
     }
 
-    static bool IsGpuHardware(LibreHardwareType type) {
-      return type.ToString().StartsWith("Gpu", StringComparison.OrdinalIgnoreCase);
-    }
-
-    static int GetGpuHardwarePriority(LibreHardwareType type) {
-      string name = type.ToString().ToLowerInvariant();
-      if (name.Contains("nvidia")) return 300;
-      if (name.Contains("amd")) return 200;
-      if (name.Contains("intel")) return 100;
-      if (name.StartsWith("gpu")) return 50;
-      return 0;
-    }
-
-    static int ScoreGpuTempSensorName(string sensorName) {
-      if (string.IsNullOrWhiteSpace(sensorName)) return 10;
-      string name = sensorName.ToLowerInvariant();
-      if (name.Contains("hot spot") || name.Contains("hotspot")) return 95;
-      if (name.Contains("core")) return 90;
-      if (name.Contains("junction")) return 85;
-      if (name.Contains("memory")) return 70;
-      return 50;
-    }
-
-    static int ScoreGpuPowerSensorName(string sensorName) {
-      if (string.IsNullOrWhiteSpace(sensorName)) return 10;
-      string name = sensorName.ToLowerInvariant();
-      if (name.Contains("package")) return 95;
-      if (name.Contains("total board")) return 92;
-      if (name.Contains("board")) return 90;
-      if (name.Contains("gpu power")) return 88;
-      if (name.Contains("core")) return 80;
-      return 50;
-    }
-
-    static void UpdateGpuSensorCandidate(LibreIHardware hardware, LibreISensor sensor, ref int bestTempScore, ref float bestTemp, ref int bestPowerScore, ref float bestPower) {
+    static void UpdateNvidiaGpuSensorCandidate(LibreISensor sensor, ref int bestTempScore, ref float bestTemp, ref int bestPowerScore, ref float bestPower) {
       if (sensor == null || !sensor.Value.HasValue) {
         return;
       }
 
-      int hardwareScore = GetGpuHardwarePriority(hardware.HardwareType);
       if (sensor.SensorType == LibreSensorType.Temperature) {
-        int score = hardwareScore + ScoreGpuTempSensorName(sensor.Name);
+        int score = ScoreNvidiaGpuTempSensorName(sensor.Name);
         if (score > bestTempScore) {
           bestTempScore = score;
           bestTemp = sensor.Value.GetValueOrDefault();
         }
       } else if (sensor.SensorType == LibreSensorType.Power) {
-        int score = hardwareScore + ScoreGpuPowerSensorName(sensor.Name);
+        int score = ScoreNvidiaGpuPowerSensorName(sensor.Name);
         if (score > bestPowerScore) {
           bestPowerScore = score;
           bestPower = sensor.Value.GetValueOrDefault();
@@ -314,9 +279,54 @@ namespace OmenSuperHub {
       }
     }
 
+    static int ScoreNvidiaGpuTempSensorName(string sensorName) {
+      if (string.IsNullOrWhiteSpace(sensorName))
+        return int.MinValue;
+
+      if (sensorName.Equals("GPU Hot Spot", StringComparison.OrdinalIgnoreCase))
+        return 400;
+      if (sensorName.Equals("GPU Core", StringComparison.OrdinalIgnoreCase))
+        return 300;
+      if (sensorName.Equals("GPU Memory Junction", StringComparison.OrdinalIgnoreCase))
+        return 200;
+      if (sensorName.IndexOf("Hot Spot", StringComparison.OrdinalIgnoreCase) >= 0)
+        return 150;
+      if (sensorName.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0)
+        return 100;
+
+      return int.MinValue;
+    }
+
+    static int ScoreNvidiaGpuPowerSensorName(string sensorName) {
+      if (string.IsNullOrWhiteSpace(sensorName))
+        return int.MinValue;
+
+      if (sensorName.Equals("GPU Package", StringComparison.OrdinalIgnoreCase))
+        return 400;
+      if (sensorName.Equals("GPU Power", StringComparison.OrdinalIgnoreCase))
+        return 300;
+      if (sensorName.Equals("GPU Board Power", StringComparison.OrdinalIgnoreCase))
+        return 200;
+      if (sensorName.IndexOf("Package", StringComparison.OrdinalIgnoreCase) >= 0)
+        return 150;
+      if (sensorName.IndexOf("Power", StringComparison.OrdinalIgnoreCase) >= 0)
+        return 100;
+
+      return int.MinValue;
+    }
+
     void RefreshTemperatureSensorsSnapshot() {
       var readings = new List<TemperatureSensorReading>();
       foreach (LibreIHardware hardware in libreComputer.Hardware) {
+        if (hardware == null) {
+          continue;
+        }
+
+        if (hardware.HardwareType != LibreHardwareType.Cpu &&
+            hardware.HardwareType != LibreHardwareType.GpuNvidia) {
+          continue;
+        }
+
         CollectTemperatureSensorsRecursive(hardware, hardware?.Name, readings);
       }
 
@@ -375,15 +385,15 @@ namespace OmenSuperHub {
         return false;
 
       string lower = name.ToLowerInvariant();
-      if (lower.Contains("gpu") || lower.Contains("nvidia") || lower.Contains("radeon"))
+      if (lower.Contains("gpu") || lower.Contains("nvidia"))
         return false;
 
-      return lower.Contains("cpu") ||
+      return lower.Contains("cpu package") ||
+             lower.Contains("cpu core") ||
+             lower.Contains("core max") ||
              lower.Contains("p-core") ||
              lower.Contains("e-core") ||
-             lower.Contains("ia core") ||
-             lower.Contains("package") ||
-             lower.Contains("core");
+             lower.Contains("ia core");
     }
 
     static bool LooksLikeGpuSensor(string name) {
@@ -391,13 +401,15 @@ namespace OmenSuperHub {
         return false;
 
       string lower = name.ToLowerInvariant();
-      return lower.Contains("gpu") ||
-             lower.Contains("nvidia") ||
-             lower.Contains("radeon") ||
-             lower.Contains("graphics") ||
+      return lower.Contains("nvidia") ||
+             lower.Contains("gpu hot spot") ||
+             lower.Contains("gpu hotspot") ||
+             lower.Contains("gpu core") ||
+             lower.Contains("gpu package") ||
+             lower.Contains("gpu power") ||
              lower.Contains("hot spot") ||
              lower.Contains("hotspot") ||
-             lower.Contains("junction");
+             lower.Contains("memory junction");
     }
 
     static bool ContainsAnyKeyword(string name, string[] keywords) {

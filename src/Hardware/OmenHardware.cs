@@ -267,7 +267,7 @@ namespace OmenSuperHub {
       SendOmenBiosWmi(0x03, dataIn, 0, 0x20009);
     }
 
-    //// 似乎没有作用，且不支持AMD
+    //// 似乎没有作用
     //public static void InitializeIntelOC() {
     //  string outputData = SendOmenBiosWmi(0x35, new byte[] { 0x00, 0x00, 0x00, 0x00 }, 128);
     //  //Console.WriteLine("+ OK: " + outputData);
