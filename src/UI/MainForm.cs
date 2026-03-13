@@ -410,9 +410,10 @@ namespace OmenSuperHub {
     }
 
     Border BuildCoolingPanel() {
-      var card = CreateCard(270);
-      var grid = CreateSettingsGrid();
-      AddTitleToGrid(grid, "散热与风扇", "调节风扇模式、转速曲线和温度响应速度。");
+      var card = CreateCard(170);
+      var root = new StackPanel();
+      root.Children.Add(CreateSectionTitle("高级覆盖"));
+      root.Children.Add(CreateSectionSubtitle("只有在预设模式不满足需求时，才需要手动改写底层参数。"));
 
       fanModeComboBox = CreateComboBox(fanModeItems, FanModeComboBox_SelectionChanged);
       fanControlComboBox = CreateComboBox(fanControlModeItems, FanControlComboBox_SelectionChanged);
@@ -420,26 +421,42 @@ namespace OmenSuperHub {
       fanTableComboBox = CreateComboBox(fanTableItems, FanTableComboBox_SelectionChanged);
       tempSensitivityComboBox = CreateComboBox(tempSensitivityItems, TempSensitivityComboBox_SelectionChanged);
 
-      AddControlRow(grid, 1, "模式", fanModeComboBox);
-      AddControlRow(grid, 2, "控制", fanControlComboBox);
-      AddControlRow(grid, 3, "手动转速", manualFanControl);
-      AddControlRow(grid, 4, "曲线", fanTableComboBox);
-      AddControlRow(grid, 5, "温度响应", tempSensitivityComboBox);
-      card.Child = grid;
+      cpuPowerComboBox = CreateComboBox(cpuPowerItems, CpuPowerComboBox_SelectionChanged);
+      gpuPowerComboBox = CreateComboBox(gpuPowerItems, GpuPowerComboBox_SelectionChanged);
+      gpuClockComboBox = CreateComboBox(gpuClockItems, GpuClockComboBox_SelectionChanged);
+
+      var advancedGrid = CreateSettingsGrid();
+      AddControlRow(advancedGrid, 1, "风扇模式", fanModeComboBox);
+      AddControlRow(advancedGrid, 2, "风扇控制", fanControlComboBox);
+      AddControlRow(advancedGrid, 3, "手动转速", manualFanControl);
+      AddControlRow(advancedGrid, 4, "风扇曲线", fanTableComboBox);
+      AddControlRow(advancedGrid, 5, "温度响应", tempSensitivityComboBox);
+      AddControlRow(advancedGrid, 6, "CPU 功率", cpuPowerComboBox);
+      AddControlRow(advancedGrid, 7, "GPU 策略", gpuPowerComboBox);
+      AddControlRow(advancedGrid, 8, "GPU 锁频", gpuClockComboBox);
+
+      var advancedExpander = new Expander {
+        Header = "显示高级设置",
+        IsExpanded = false,
+        Background = Brushes.Transparent,
+        Foreground = strongText,
+        FontSize = 14,
+        FontWeight = FontWeights.SemiBold,
+        Content = advancedGrid
+      };
+      root.Children.Add(advancedExpander);
+      card.Child = root;
       return card;
     }
 
     Border BuildPerformancePanel() {
       var card = CreateCard(220);
       var grid = CreateSettingsGrid();
-      AddTitleToGrid(grid, "功耗与性能", "先选主模式，再按需覆盖 CPU/GPU 和锁频。");
+      AddTitleToGrid(grid, "主模式", "先选择目标，再让系统自动平衡温度、噪声和功耗。");
 
       usageModeComboBox = CreateComboBox(usageModeItems, UsageModeComboBox_SelectionChanged);
-      cpuPowerComboBox = CreateComboBox(cpuPowerItems, CpuPowerComboBox_SelectionChanged);
-      gpuPowerComboBox = CreateComboBox(gpuPowerItems, GpuPowerComboBox_SelectionChanged);
-      gpuClockComboBox = CreateComboBox(gpuClockItems, GpuClockComboBox_SelectionChanged);
       smartPowerControlCheckBox = new CheckBox {
-        Content = "启用智能功耗控制（Eco / Balanced / Performance / Protect）",
+        Content = "启用智能功耗保护与自动调节",
         Foreground = strongText,
         FontSize = 14,
         Margin = new Thickness(0, 6, 0, 8),
@@ -448,11 +465,20 @@ namespace OmenSuperHub {
       smartPowerControlCheckBox.Checked += SmartPowerControlCheckBox_Changed;
       smartPowerControlCheckBox.Unchecked += SmartPowerControlCheckBox_Changed;
 
+      var hintText = new TextBlock {
+        Text = "安静：优先低噪声和低功耗 | 均衡：默认日常模式 | 性能：优先负载表现，但仍受温度墙保护",
+        Foreground = mutedText,
+        FontSize = 12,
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(0, 4, 0, 6)
+      };
+
       AddControlRow(grid, 1, "主模式", usageModeComboBox);
-      AddControlRow(grid, 2, "CPU 功率", cpuPowerComboBox);
-      AddControlRow(grid, 3, "GPU 策略", gpuPowerComboBox);
-      AddControlRow(grid, 4, "GPU 锁频", gpuClockComboBox);
-      AddControlRow(grid, 5, "智能控制", smartPowerControlCheckBox);
+      Grid.SetRow(hintText, 2);
+      Grid.SetColumn(hintText, 0);
+      Grid.SetColumnSpan(hintText, 2);
+      grid.Children.Add(hintText);
+      AddControlRow(grid, 3, "智能控制", smartPowerControlCheckBox);
       card.Child = grid;
       return card;
     }
